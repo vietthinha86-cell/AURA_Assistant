@@ -1,0 +1,113 @@
+{
+  "_instructions": {
+    "description": "Danh sách các kênh YouTube chính thức phát sóng trực tiếp các giải đấu thể thao điện tử.",
+    "how_to_get_channel_id": [
+      "Bước 1: Mở trình duyệt và truy cập trang chủ kênh YouTube cần lấy (ví dụ: https://www.youtube.com/@LCKTiengViet).",
+      "Bước 2: Nhấn chuột phải vào khoảng trống trên trang, chọn 'Xem nguồn trang' (hoặc nhấn phím tắt Ctrl + U).",
+      "Bước 3: Nhấn phím Ctrl + F để mở thanh tìm kiếm, gõ: itemprop=\"channelId\" hoặc externalId.",
+      "Bước 4: Sao chép chuỗi mã bắt đầu bằng chữ 'UC' có đúng 24 ký tự (ví dụ: UCm0P5i4TNItvgmPCZCGSyYA).",
+      "Bước 5: Dán mã kênh đó vào trường 'channelId' và dán đường link kênh vào 'channelUrl' trong file này.",
+      "Lưu ý: Nếu chưa chắc chắn mã kênh hoặc địa chỉ, hãy để trống chuỗi rỗng \"\" theo nguyên tắc an toàn, hệ thống sẽ tự động bỏ qua các kênh chưa cấu hình và không bịa đặt."
+    ]
+  },
+  "channels": [
+    {
+      "id": "lck_vi",
+      "tournament": "LCK",
+      "region": "Hàn Quốc (LCK)",
+      "language": "vi",
+      "name": "LCK Tiếng Việt",
+      "channelId": "UCm0P5i4TNItvgmPCZCGSyYA",
+      "channelUrl": "https://www.youtube.com/@LCKTiengViet",
+      "keywords": [
+        "lck", "lck tiếng việt", "lck việt nam", "liên minh hàn quốc", "lmht hàn quốc",
+        "t1", "geng", "gen.g", "hle", "hanwha life", "dk", "dplus", "kt", "drx", "faker", "chovy"
+      ],
+      "priority": 10
+    },
+    {
+      "id": "lck_global",
+      "tournament": "LCK",
+      "region": "Hàn Quốc (LCK)",
+      "language": "en",
+      "name": "LCK Global",
+      "channelId": "UCKVlixycWmapnGQ_wht4cHQ",
+      "channelUrl": "https://www.youtube.com/@LCKglobal",
+      "keywords": [
+        "lck", "lck global", "lck english", "lck eng", "t1", "gen.g", "geng", "faker"
+      ],
+      "priority": 5
+    },
+    {
+      "id": "vcs_vi",
+      "tournament": "VCS",
+      "region": "Việt Nam (VCS)",
+      "language": "vi",
+      "name": "Vietnam Championship Series - LMHT",
+      "channelId": "UChHRanDWBQbCAs9wKRxcTCw",
+      "channelUrl": "https://www.youtube.com/@vcslmht",
+      "keywords": [
+        "vcs", "vcs lmht", "giải việt nam", "liên minh huyền thoại việt nam", "lmht việt nam",
+        "gam", "gam esports", "ts", "team secret", "vke", "vikings", "tw", "team whales"
+      ],
+      "priority": 10
+    },
+    {
+      "id": "lpl_vi",
+      "tournament": "LPL",
+      "region": "Trung Quốc (LPL)",
+      "language": "vi",
+      "name": "LPL Vietnam Official",
+      "channelId": "UCxvYKtF8x60IUk4Kvfs8C4g",
+      "channelUrl": "https://www.youtube.com/@LPLVietnamOfficial",
+      "keywords": [
+        "lpl", "lpl việt nam", "lpl tiếng việt", "liên minh trung quốc", "lmht trung quốc",
+        "blg", "bilibili", "tes", "top esports", "wbg", "weibo gaming", "jdg", "jd gaming", "lng"
+      ],
+      "priority": 10
+    },
+    {
+      "id": "lolesports_global",
+      "tournament": "Worlds / MSI / LoL Esports",
+      "region": "Quốc tế (Global)",
+      "language": "en",
+      "name": "LoL Esports",
+      "channelId": "UCvqRdlKsE5Q8mf8YXbdIJLw",
+      "channelUrl": "https://www.youtube.com/@lolesports",
+      "keywords": [
+        "cktg", "worlds", "chung kết thế giới", "msi", "mid-season invitational",
+        "lol esports", "liên minh huyền thoại", "lmht", "league of legends"
+      ],
+      "priority": 8
+    },
+    {
+      "id": "lpl_en",
+      "tournament": "LPL English",
+      "region": "Trung Quốc (LPL)",
+      "language": "en",
+      "name": "LPL English (Official)",
+      "channelId": "",
+      "channelUrl": "",
+      "keywords": [
+        "lpl english", "lpl eng", "lpl global"
+      ],
+      "priority": 5,
+      "note": "Để trống địa chỉ nếu chưa chắc chắn theo yêu cầu an toàn. Người dùng có thể điền channelId theo hướng dẫn."
+    },
+    {
+      "id": "lec_en",
+      "tournament": "LEC",
+      "region": "Châu Âu (LEC)",
+      "language": "en",
+      "name": "LEC (Official)",
+      "channelId": "",
+      "channelUrl": "",
+      "keywords": [
+        "lec", "châu âu", "g2", "fnatic"
+      ],
+      "priority": 5,
+      "note": "Để trống địa chỉ nếu chưa chắc chắn theo yêu cầu an toàn. Người dùng có thể điền channelId theo hướng dẫn."
+    }
+  ]
+}
+

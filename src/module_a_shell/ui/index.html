@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AURA - Trợ Lý Ảo Hình Người Trên Desktop</title>
+  <link rel="stylesheet" href="./styles.css" />
+
+  <!-- Import Map dùng đường dẫn tương đối chuẩn để chạy mượt trên Electron loadFile -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../../../node_modules/three/build/three.module.js",
+        "three/addons/": "../../../node_modules/three/examples/jsm/",
+        "@pixiv/three-vrm": "../../../node_modules/@pixiv/three-vrm/lib/three-vrm.module.min.js"
+      }
+    }
+  </script>
+</head>
+<body class="mode-docked">
+  <div class="aura-root" id="auraRoot">
+
+    <!-- BƯỚC 6: Viền sáng & biểu tượng thông báo khi Aura đang điều khiển máy -->
+    <div id="computerUseGlow" class="computer-use-glow hidden"></div>
+    <div id="computerUseBadge" class="computer-use-badge hidden"><span class="pulse-dot"></span> 🤖 Aura đang điều khiển máy</div>
+    <div id="screenshotToast" class="screenshot-toast hidden">📸 Đang chụp màn hình...</div>
+
+    <!-- 3D VRM Avatar Stage (pointer-events: none để click xuyên qua nhân vật xuống màn hình sau) -->
+    <div id="vrmStage"></div>
+
+    <!-- Thanh tiêu đề nổi (.interactive-ui: luôn bấm được) -->
+    <div class="top-bar interactive-ui">
+      <div class="drag-handle" id="dragHandle" title="Giữ chuột trái để kéo Aura đi bất kỳ đâu trên màn hình">
+        <div class="status-dot" id="statusDot"></div>
+        <span class="brand-title">AURA</span>
+        <span class="brand-sub" id="stepBadge">Bước 6: Computer-Use & Điều khiển máy</span>
+      </div>
+      <div class="win-buttons">
+        <button class="win-btn active-mode" id="btnModeDocked" title="Ghim góc màn hình (Xuyên chuột vùng nền)">📌 Ghim</button>
+        <button class="win-btn" id="btnModeExpanded" title="Mở rộng cửa sổ">🗖 Mở rộng</button>
+        <button class="win-btn" id="btnModeFull" title="Phóng to toàn màn hình">⛶ Full</button>
+        <button class="win-btn" id="btnDevTools" title="Mở/Đóng cửa sổ Console (F12)">🛠️ Log</button>
+        <button class="win-btn" id="btnMinimize" title="Thu nhỏ xuống Taskbar">➖</button>
+        <button class="win-btn danger" id="btnClose" title="Đóng Aura">✖</button>
+      </div>
+    </div>
+
+    <!-- Overlay kiểm chứng RAM / CPU / FPS / Giọng nói thực tế (.interactive-ui) -->
+    <div class="telemetry-overlay interactive-ui" id="telemetryBox">
+      <div class="tele-row">
+        <span class="tele-label">Aura RAM:</span>
+        <span class="tele-val good" id="valAuraRam">-- MB / 2500 MB</span>
+      </div>
+      <div class="tele-row">
+        <span class="tele-label">Sys RAM:</span>
+        <span class="tele-val" id="valSysRam">--% (-- GB)</span>
+      </div>
+      <div class="tele-row">
+        <span class="tele-label">Aura CPU:</span>
+        <span class="tele-val good" id="valAuraCpu">--%</span>
+      </div>
+      <div class="tele-row">
+        <span class="tele-label">FPS (VRM):</span>
+        <span class="tele-val good" id="valFps">-- / 30</span>
+      </div>
+      <div class="tele-row">
+        <span class="tele-label">TTS Voice:</span>
+        <span class="tele-val good" id="valVoice">HoaiMy / Aria</span>
+      </div>
+      <div class="tele-row">
+        <span class="tele-label">STT Whisper:</span>
+        <span class="tele-val" id="valStt">chưa nạp (tiết kiệm RAM)</span>
+      </div>
+      <div class="tele-row">
+        <span class="tele-label">LLM Brain:</span>
+        <span class="tele-val good" id="valLlm">Gemini (0 lượt nhớ)</span>
+      </div>
+      <div class="tele-row">
+        <span class="tele-label">Textures:</span>
+        <span class="tele-val good" id="valTextures">&le;1024px</span>
+      </div>
+      <div class="lite-badge" id="liteModeBadge">⚡ Chế độ Chuẩn (30 FPS)</div>
+    </div>
+
+    <!-- Khu vực lời thoại, Ô nhập chữ TTS, Nút điều khiển & Mini Console (.interactive-ui: luôn bấm được) -->
+    <div class="bottom-dock interactive-ui">
+      <div class="speech-bubble">
+        <div class="speech-header">
+          <span id="emotionLabel">🌸 AURA (TRẠNG THÁI: DỊU DÀNG)</span>
+          <div class="lipsync-meter-wrap" title="Cường độ âm thanh AnalyserNode điều khiển khẩu hình miệng">
+            <span id="lipSyncRmsLabel">LipSync: 0%</span>
+            <div class="lipsync-meter-track">
+              <div class="lipsync-meter-fill" id="lipSyncMeterFill"></div>
+            </div>
+          </div>
+        </div>
+        <div class="speech-content" id="speechText">
+          Đang tải mô hình nhân vật nữ 3D VRM (Aura)...
+        </div>
+      </div>
+
+      <!-- Bước 3 & 4: Khung chat hội thoại thông minh + nút Bật/Tắt giọng nói rảnh tay + Xoá ngữ cảnh -->
+      <div class="chat-panel" id="chatPanel">
+        <div class="chat-log" id="chatLog">
+          <div class="chat-msg sys">Bấm 1 lần nút 🎤 (hoặc phím <b>F9</b>) để trò chuyện bằng giọng nói, hoặc gõ câu hỏi vào ô bên dưới để hỏi <b>Aura AI</b>.</div>
+        </div>
+        <div class="stt-bar">
+          <button class="mic-btn" id="btnMic" title="Bấm 1 lần để Bật trò chuyện giọng nói rảnh tay, bấm lại để Tắt (Phím tắt: F9 hoặc Ctrl+Space)">
+            🎤 Bắt đầu trò chuyện (F9)
+          </button>
+          <button class="clear-ctx-btn" id="btnAutoPilot" title="Cho phép Aura tự động điều khiển chuột/phím mà không cần hỏi từng bước trong 10 phút">
+            ⚡ Tự động (10p)
+          </button>
+          <button class="clear-ctx-btn" id="btnClearContext" title="Xoá bộ nhớ ngữ cảnh hội thoại ngắn hạn (10-20 lượt gần nhất)">
+            🧹 Xoá ngữ cảnh
+          </button>
+          <button class="clear-ctx-btn" id="btnViewLogs" title="Xem lịch sử các công cụ hệ thống Aura đã thực thi gần đây">
+            📋 Xem log
+          </button>
+          <label class="echo-toggle" title="Tự động đọc thành tiếng câu trả lời của Aura">
+            <input type="checkbox" id="chkEcho" checked /> Đọc trả lời
+          </label>
+          <span class="stt-status" id="sttStatus">Mic: đang tắt</span>
+        </div>
+      </div>
+
+      <!-- Bước 2 & 4: Ô nhập chữ gửi cho AI trả lời (Enter) + nút Đọc nguyên văn + 2 nút thử nhanh -->
+      <div class="tts-panel" id="ttsPanel">
+        <div class="tts-input-row">
+          <input
+            type="text"
+            id="ttsInput"
+            class="tts-input"
+            placeholder="Hỏi Aura bằng tiếng Việt hoặc tiếng Anh (Enter để gửi AI)..."
+          />
+          <button class="tts-speak-btn" id="btnAskAi" title="Gửi câu hỏi cho bộ não AI (Gemini/Claude) trả lời và đọc thành tiếng">💬 Gửi AI</button>
+          <button class="ctrl-btn" id="btnSpeakInput" title="Chỉ đọc nguyên văn câu vừa gõ (TTS)">🔊 Đọc</button>
+        </div>
+        <div class="tts-quick-row">
+          <button class="tts-quick-btn" id="btnSpeakVi" title="Thử giọng nữ Tiếng Việt (vi-VN-HoaiMyNeural)">
+            🇻🇳 Nói tiếng Việt
+          </button>
+          <button class="tts-quick-btn" id="btnSpeakEn" title="Thử giọng nữ Tiếng Anh (en-US-AriaNeural)">
+            🇺🇸 Say English
+          </button>
+        </div>
+      </div>
+
+      <!-- Thanh công cụ biểu cảm & cấu hình -->
+      <div class="control-bar" id="controlBar">
+        <button class="ctrl-btn active" id="btnEmoNeutral" data-emotion="neutral">😐 Bình thường</button>
+        <button class="ctrl-btn" id="btnEmoHappy" data-emotion="happy">😊 Vui vẻ</button>
+        <button class="ctrl-btn" id="btnEmoSerious" data-emotion="serious">🧐 Nghiêm túc</button>
+        <button class="ctrl-btn" id="btnEmoApologetic" data-emotion="apologetic">🥺 Xin lỗi</button>
+        <button class="ctrl-btn" id="btnNod">頷 Gật đầu</button>
+        <button class="ctrl-btn" id="btnTestSpeak">🗣️ Thử mấp máy môi</button>
+        <button class="ctrl-btn" id="btnToggleLite">🍃 Chế độ nhẹ</button>
+        <button class="ctrl-btn" id="btnChangeVrm">📂 Đổi VRM</button>
+        <input type="file" id="vrmFileInput" accept=".vrm" style="display:none" />
+      </div>
+
+      <!-- Khung Console trực tiếp để người dùng kiểm chứng mỗi lần bấm nút -->
+      <div class="console-mini" id="miniConsole">
+        <div class="console-line">[Console] Sẵn sàng kiểm chứng TTS (edge-tts) + Lip-Sync (AnalyserNode)...</div>
+      </div>
+    </div>
+
+    <!-- BƯỚC 5: HỘP THOẠI XÁC NHẬN AN TOÀN CHO HÀNH ĐỘNG RỦI RO CAO -->
+    <div class="modal-backdrop" id="confirmModal" style="display: none;">
+      <div class="modal-box interactive-ui">
+        <div class="modal-header">
+          <span class="modal-title" id="confirmTitle">⚠️ Xác nhận an toàn</span>
+          <span class="modal-timer-badge" id="confirmTimerBadge">30s</span>
+        </div>
+        <div class="modal-body" id="confirmDesc">
+          Aura chuẩn bị thực hiện một hành động có rủi ro. Bạn có đồng ý cho phép không?
+        </div>
+        <div class="modal-progress-wrap">
+          <div class="modal-progress-bar" id="confirmProgressBar"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-btn cancel" id="btnConfirmCancel">❌ Huỷ (Hủy bỏ)</button>
+          <button class="modal-btn confirm" id="btnConfirmApprove">✅ Đồng ý (Thực hiện)</button>
+        </div>
+        <div class="modal-subtext">Nhấn <b>Ctrl+Alt+Esc</b> bất kỳ lúc nào để huỷ ngay lập tức. Tự huỷ sau 30s.</div>
+      </div>
+    </div>
+
+    <!-- BƯỚC 5: MODAL XEM AUDIT LOG CÁC TOOL GẦN NHẤT -->
+    <div class="modal-backdrop" id="logModal" style="display: none;">
+      <div class="modal-box wide interactive-ui">
+        <div class="modal-header">
+          <span class="modal-title">📋 Lịch sử thực thi Công cụ (Tool Audit Logs)</span>
+          <button class="modal-close-btn" id="btnCloseLogModal">✖</button>
+        </div>
+        <div class="modal-body scrollable" id="logTableContainer">
+          <div style="text-align:center;color:#94a3b8;padding:20px;">Đang tải lịch sử công cụ...</div>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-btn secondary" id="btnRefreshLogs">🔄 Làm mới</button>
+          <button class="modal-btn confirm" id="btnDoneLogs">Đóng</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- BƯỚC 5: TOAST THÔNG BÁO LỜI NHẮC HẸN GIỜ -->
+    <div class="reminder-toast" id="reminderToast" style="display: none;">
+      <div class="reminder-icon">⏰</div>
+      <div class="reminder-content">
+        <div class="reminder-title">LỜI NHẮC TỪ AURA!</div>
+        <div class="reminder-msg" id="reminderToastMsg">Đến giờ rồi nhé!</div>
+      </div>
+      <button class="reminder-close-btn" id="btnDismissReminder">✖</button>
+    </div>
+
+  </div>
+
+  <!-- Bắt mọi lỗi JS toàn cục nếu có để hiển thị rõ lên Console -->
+  <script>
+    window.addEventListener('error', (e) => {
+      console.error('[GLOBAL JS ERROR]', e.message, e.filename, e.lineno);
+      const mc = document.getElementById('miniConsole');
+      if (mc) {
+        const d = document.createElement('div');
+        d.className = 'console-line';
+        d.style.color = '#f87171';
+        d.textContent = `[JS Error] ${e.message}`;
+        mc.appendChild(d);
+        mc.scrollTop = mc.scrollHeight;
+      }
+    });
+  </script>
+
+  <!-- Module kết nối chính -->
+  <script type="module">
+    import { AuraEventBus, AURA_EMOTIONS, WINDOW_MODES } from '../../interfaces/aura_contracts.js';
+    import { VRMAvatarEngine } from '../../module_b_avatar/vrm_avatar_engine.js';
+    import { EdgeTTSService } from '../../module_d_tts/tts_service.js';
+    import { WhisperSTTService } from '../../module_c_stt/stt_service.js';
+    import { AuraBrainService } from '../../module_e_brain/brain_service.js';
+
+    const eventBus = new AuraEventBus();
+    const avatar = new VRMAvatarEngine(eventBus, {
+      maxFps: 30,
+      liteFps: 15,
+      maxTextureSize: 1024
+    });
+
+    const tts = new EdgeTTSService(eventBus, avatar, {
+      voiceVi: 'vi-VN-HoaiMyNeural',
+      voiceEn: 'en-US-AriaNeural',
+      rate: '+8%',
+      pitch: '+5Hz'
+    });
+
+    const brain = new AuraBrainService(eventBus);
+    const valLlm = document.getElementById('valLlm');
+    const btnClearContext = document.getElementById('btnClearContext');
+    const btnAskAi = document.getElementById('btnAskAi');
+
+    const speechText = document.getElementById('speechText');
+    const emotionLabel = document.getElementById('emotionLabel');
+    const miniConsole = document.getElementById('miniConsole');
+    const ttsInput = document.getElementById('ttsInput');
+    const valVoice = document.getElementById('valVoice');
+    const lipSyncMeterFill = document.getElementById('lipSyncMeterFill');
+    const lipSyncRmsLabel = document.getElementById('lipSyncRmsLabel');
+
+    let manualLiteOverride = false;
+    let isSynthesizing = false;
+    let lastTtsResult = null;
+
+    // Expose trạng thái cho bộ kiểm thử tự động --autotest-step2
+    window.__auraGetStep2State = () => {
+      const s = avatar.getStats();
+      return {
+        ...s,
+        isSynthesizing,
+        lastTtsResult
+      };
+    };
+
+    // Hàm ghi log ra cả DevTools Console, Mini Console trên màn hình và File Log của Host
+    function logButtonClick(btnName, detail) {
+      const ts = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+      const msg = `[${ts}] ${btnName} -> ${detail}`;
+      console.log(msg);
+
+      if (miniConsole) {
+        const line = document.createElement('div');
+        line.className = 'console-line';
+        line.textContent = msg;
+        miniConsole.appendChild(line);
+        while (miniConsole.children.length > 18) {
+          miniConsole.removeChild(miniConsole.firstChild);
+        }
+        miniConsole.scrollTop = miniConsole.scrollHeight;
+      }
+
+      if (window.auraElectron) {
+        window.auraElectron.logAction('UI_EVENT', `${btnName} -> ${detail}`);
+      }
+    }
+
+    function updateLiteBadge() {
+      const stats = avatar.getStats();
+      const badge = document.getElementById('liteModeBadge');
+      const btnLite = document.getElementById('btnToggleLite');
+      if (stats.isLiteMode) {
+        badge.className = 'lite-badge active';
+        badge.textContent = `🍃 Chế độ Nhẹ (${stats.maxFps} FPS - ${stats.liteModeReason})`;
+        if (btnLite) btnLite.classList.add('active');
+      } else {
+        badge.className = 'lite-badge';
+        badge.textContent = `⚡ Chế độ Chuẩn (${stats.maxFps} FPS)`;
+        if (btnLite) btnLite.classList.remove('active');
+      }
+    }
+
+    const emotionLabels = {
+      neutral: '🌸 AURA (TRẠNG THÁI: DỊU DÀNG)',
+      happy: '😊 AURA (TRẠNG THÁI: VUI VẺ)',
+      serious: '🧐 AURA (TRẠNG THÁI: NGHIÊM TÚC)',
+      apologetic: '🥺 AURA (TRẠNG THÁI: XIN LỖI)'
+    };
+
+    // ========================================================================
+    // LẮNG NGHE SỰ KIỆN TỪ MODULE D (EDGE-TTS)
+    // ========================================================================
+    eventBus.on('tts:synthesizing', (info) => {
+      isSynthesizing = true;
+      valVoice.textContent = `${info.lang.toUpperCase()} (${info.voice.replace('Neural', '')})`;
+      speechText.innerHTML = `⏳ <i>Đang tổng hợp giọng nói (${info.voice})...</i><br/>"${info.text}"`;
+      logButtonClick('TTS_START', `Ngôn ngữ=${info.lang} | Giọng=${info.voice}`);
+    });
+
+    eventBus.on('tts:playing', (info) => {
+      isSynthesizing = false;
+      lastTtsResult = info;
+      emotionLabel.textContent = emotionLabels[info.emotion] || emotionLabels.neutral;
+      speechText.innerHTML =
+        `🔊 <b>[${info.voice}]</b> "${info.text}" ` +
+        `<span style="color:#38bdf8;font-size:11px;">(Độ trễ: ${info.totalLatencyMs}ms | ${info.durationSec}s)</span>`;
+      logButtonClick(
+        'TTS_PLAYING',
+        `Voice=${info.voice} | Latency=${info.totalLatencyMs}ms (FirstChunk=${info.firstChunkMs}ms) | Duration=${info.durationSec}s`
+      );
+    });
+
+    eventBus.on('tts:ended', (info) => {
+      isSynthesizing = false;
+      const stats = avatar.getStats();
+      logButtonClick(
+        'TTS_ENDED',
+        `Hoàn tất phát âm thanh (${info.durationSec}s) | PeakRMS=${stats.peakAudioRms} | PeakMouth=${stats.peakMouthOpen}`
+      );
+    });
+
+    async function speakWithTts(text, langHint = 'auto', triggerButtonName = 'TTS', emotionOverride = null) {
+      const clean = (text || '').trim();
+      if (!clean) {
+        speechText.textContent = 'Anh/chị hãy nhập một câu tiếng Việt hoặc tiếng Anh vào ô bên dưới để em đọc nhé!';
+        return;
+      }
+      logButtonClick(triggerButtonName, `Yêu cầu nói: "${clean}" (lang=${langHint}, emotion=${emotionOverride || 'auto'})`);
+      try {
+        await tts.synthesizeStream(clean, langHint, null, emotionOverride);
+      } catch (err) {
+        isSynthesizing = false;
+        console.warn('[TTS FALLBACK TO TEXT]', err.message);
+        logButtonClick('TTS_ERROR', `${err.message} -> Tự động hiển thị chữ trên giao diện`);
+        // Yêu cầu: Không được im lặng khi lỗi TTS -> Hiển thị chữ rõ ràng và cho avatar gật đầu phản hồi
+        speechText.innerHTML = `<strong>Aura:</strong> ${escapeHtml(clean)}<br/><small style="color:#fbbf24">⚠️ [Không có kết nối giọng đọc edge-tts, em gửi bằng chữ ạ]</small>`;
+        if (avatar && typeof avatar.nod === 'function') {
+          avatar.nod();
+        }
+      }
+    }
+
+    function updateLlmTelemetry(statusObj) {
+      if (!valLlm || !statusObj) return;
+      const prov = (statusObj.activeProvider || 'gemini').toUpperCase();
+      const turns = statusObj.historyTurns ?? 0;
+      const maxTurns = statusObj.maxTurns ?? 15;
+      valLlm.textContent = `${prov} (${turns}/${maxTurns} lượt nhớ)`;
+      valLlm.className = 'tele-val good';
+    }
+
+    function applyEmotionToUiAndAvatar(emotionTag, avatarEmotionTag) {
+      const targetAvatarEmo =
+        avatarEmotionTag ||
+        (emotionTag === 'sorry' ? 'apologetic' : emotionTag) ||
+        'neutral';
+      avatar.setEmotion(targetAvatarEmo);
+      emotionLabel.textContent = emotionLabels[targetAvatarEmo] || emotionLabels.neutral;
+      document.querySelectorAll('[data-emotion]').forEach((b) => {
+        b.classList.toggle('active', b.getAttribute('data-emotion') === targetAvatarEmo);
+      });
+    }
+
+    /**
+     * LUỒNG HOÀN CHỈNH BƯỚC 4:
+     * Nhận câu nói (từ STT hoặc ô gõ chữ) -> Gửi LLM (Gemini/Claude) -> Đổi biểu cảm VRM -> Hiển thị khung chat -> Đọc TTS + Lip-Sync
+     * Đồng thời đo và ghi log đầy đủ: provider, số token, độ trễ từng khâu (STT, LLM, TTS) và tổng độ trễ đến lúc Aura bắt đầu nói.
+     */
+    async function askBrainAndSpeak(userText, options = {}) {
+      const clean = (userText || '').trim();
+      if (!clean) return null;
+
+      const source = options.source || 'text';
+      const sttLatencyMs = Number(options.sttLatencyMs || 0);
+      const tTurnFinished = performance.now();
+
+      if (options.showUserChat !== false) {
+        addChat('user', clean, source === 'text' ? 'Gõ chữ' : '');
+      }
+
+      speechText.innerHTML = `🧠 <i>Aura đang suy nghĩ câu trả lời...</i>`;
+      sttStatusEl.textContent = 'AI đang suy nghĩ…';
+
+      const tLlm0 = performance.now();
+      let llmRes = null;
+      try {
+        const isComputerUseIntent = Boolean(
+          options.computerUse ||
+          /\b(bấm vào|click|double click|nhấp đúp|cuộn|scroll|mở notepad rồi gõ|tìm phim hài rồi bấm|chụp màn hình|quan sát màn hình)\b/i.test(clean)
+        );
+
+        if (isComputerUseIntent && window.auraElectron && typeof window.auraElectron.computerUseRunTask === 'function') {
+          speechText.innerHTML = `🤖 <i>Aura đang nhìn màn hình và điều khiển máy tính...</i>`;
+          sttStatusEl.textContent = 'Aura đang điều khiển…';
+          const cuRes = await window.auraElectron.computerUseRunTask(clean, options);
+          llmRes = {
+            ok: Boolean(cuRes && cuRes.success),
+            text: (cuRes && cuRes.text) || (cuRes && cuRes.success ? 'Dạ em đã hoàn thành nhiệm vụ rồi ạ!' : 'Thao tác điều khiển máy tính không thành công.'),
+            emotion: (cuRes && cuRes.emotion) || (cuRes && cuRes.success ? 'happy' : 'sorry'),
+            avatarEmotion: (cuRes && cuRes.emotion) || 'neutral',
+            provider: 'computer-use',
+            model: 'agentic-loop',
+            latencyMs: Math.round(performance.now() - tLlm0),
+            tokens: { input: 0, output: 0, total: 0 }
+          };
+        } else {
+          llmRes = await brain.processUserMessage(clean, options.lang || 'auto', {
+            provider: options.provider || null,
+            testOverrideKey: options.testOverrideKey || null,
+            skipHistory: Boolean(options.skipHistory)
+          });
+        }
+      } catch (err) {
+        llmRes = {
+          ok: false,
+          errorCode: 'IPC_ERROR',
+          provider: 'gemini',
+          model: '',
+          text: 'Xin lỗi bạn, bộ não AI đang gặp sự cố kết nối nội bộ.',
+          emotion: 'sorry',
+          avatarEmotion: 'apologetic',
+          lang: 'vi',
+          latencyMs: Math.round(performance.now() - tLlm0),
+          tokens: { input: 0, output: 0, total: 0 }
+        };
+      }
+
+      const llmLatencyMs = llmRes.latencyMs || Math.round(performance.now() - tLlm0);
+      updateLlmTelemetry(llmRes);
+
+      // Đổi biểu cảm của Avatar theo nhãn emotion riêng (neutral / happy / serious / sorry) mà không đọc nhãn này thành tiếng
+      applyEmotionToUiAndAvatar(llmRes.emotion, llmRes.avatarEmotion);
+
+      const metaParts = [
+        `${String(llmRes.provider || 'llm').toUpperCase()}${llmRes.model ? '/' + llmRes.model : ''}`,
+        `biểu cảm: ${llmRes.emotion || 'neutral'}`,
+        `LLM ${llmLatencyMs}ms`
+      ];
+      if (llmRes.tokens && llmRes.tokens.total) {
+        metaParts.push(`${llmRes.tokens.total} tok`);
+      }
+      if (!llmRes.ok && llmRes.errorCode) {
+        metaParts.push(`LỖI: ${llmRes.errorCode}`);
+      }
+
+      addChat('aura', llmRes.text, metaParts.join(' · '));
+      speechText.textContent = llmRes.text;
+
+      let ttsFirstAudioMs = 0;
+      let totalToSpeakStartMs = sttLatencyMs + llmLatencyMs;
+      const shouldSpeak = options.speak !== false && chkEcho.checked;
+
+      if (shouldSpeak && llmRes.text) {
+        stt.setPausedForReply(true);
+        sttStatusEl.textContent = 'Aura đang trả lời…';
+
+        let measuredTtsStart = 0;
+        const offPlaying = eventBus.on('tts:playing', (playInfo) => {
+          measuredTtsStart = playInfo.totalLatencyMs || 0;
+        });
+
+        try {
+          await speakWithTts(
+            llmRes.text,
+            llmRes.lang || 'auto',
+            `🧠 AI Reply (${llmRes.provider})`,
+            llmRes.avatarEmotion || llmRes.emotion
+          );
+        } finally {
+          offPlaying();
+          stt.setPausedForReply(false);
+          sttStatusEl.textContent = stt.isConversationActive ? 'Đang lắng nghe…' : 'Mic: đang tắt';
+        }
+
+        ttsFirstAudioMs = measuredTtsStart || (lastTtsResult ? lastTtsResult.totalLatencyMs : 0);
+        totalToSpeakStartMs = sttLatencyMs + llmLatencyMs + ttsFirstAudioMs;
+      } else {
+        sttStatusEl.textContent = stt.isConversationActive ? 'Đang lắng nghe…' : 'Mic: đang tắt';
+      }
+
+      const pipelineLog =
+        `Source=${source} | Provider=${llmRes.provider}/${llmRes.model || ''} | OK=${llmRes.ok} | ErrorCode=${llmRes.errorCode || 'NONE'} | ` +
+        `Tokens(in=${llmRes.tokens?.input || 0},out=${llmRes.tokens?.output || 0},total=${llmRes.tokens?.total || 0}) | ` +
+        `Emotion=${llmRes.emotion}(avatar=${llmRes.avatarEmotion}) | Lang=${llmRes.lang} | ` +
+        `Latency: STT=${sttLatencyMs}ms + LLM=${llmLatencyMs}ms + TTS_Start=${ttsFirstAudioMs}ms => TOTAL_TO_SPEAK=${totalToSpeakStartMs}ms | ` +
+        `User="${clean.substring(0, 70)}" | Reply="${(llmRes.text || '').substring(0, 100)}"`;
+
+      if (window.auraElectron) {
+        window.auraElectron.logAction('PIPELINE_STEP4', pipelineLog);
+      }
+      logButtonClick(
+        'PIPELINE_STEP4',
+        `${llmRes.provider} (${llmRes.emotion}) | STT=${sttLatencyMs}ms + LLM=${llmLatencyMs}ms + TTS=${ttsFirstAudioMs}ms => Tổng=${totalToSpeakStartMs}ms`
+      );
+
+      return {
+        ...llmRes,
+        sttLatencyMs,
+        llmLatencyMs,
+        ttsLatencyMs: ttsFirstAudioMs,
+        totalToSpeakStartMs,
+        wallEndToEndMs: Math.round(performance.now() - tTurnFinished)
+      };
+    }
+
+    // ========================================================================
+    // BƯỚC 3: STT (faster-whisper) - BẤM 1 LẦN BẬT/TẮT TRÒ CHUYỆN GIỌNG NÓI RẢNH TAY
+    // ========================================================================
+    const stt = new WhisperSTTService(eventBus, { model: 'small', computeType: 'int8' });
+    const chatLog = document.getElementById('chatLog');
+    const btnMic = document.getElementById('btnMic');
+    const chkEcho = document.getElementById('chkEcho');
+    const sttStatusEl = document.getElementById('sttStatus');
+    const valStt = document.getElementById('valStt');
+    const MIC_IDLE_LABEL = '🎤 Bắt đầu trò chuyện (F9)';
+    const MIC_ACTIVE_LABEL = '🛑 Đang trò chuyện (Bấm để tắt)';
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+
+    function addChat(kind, text, meta = '') {
+      const div = document.createElement('div');
+      div.className = `chat-msg ${kind}`;
+      const who = kind === 'user' ? '🧑 Bạn' : kind === 'aura' ? '🌸 Aura' : 'ℹ️';
+      div.innerHTML =
+        `<span class="chat-who">${who}</span>` +
+        (meta ? `<span class="chat-meta">${escapeHtml(meta)}</span>` : '') +
+        `<div class="chat-text">${escapeHtml(text)}</div>`;
+      chatLog.appendChild(div);
+      while (chatLog.children.length > 40) chatLog.removeChild(chatLog.firstChild);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function resetMicButton() {
+      btnMic.classList.remove('recording', 'processing');
+      btnMic.textContent = MIC_IDLE_LABEL;
+      sttStatusEl.textContent = 'Mic: đang tắt';
+    }
+
+    eventBus.on('stt:conversation_state', ({ active }) => {
+      if (active) {
+        btnMic.classList.add('recording');
+        btnMic.classList.remove('processing');
+        btnMic.textContent = MIC_ACTIVE_LABEL;
+        sttStatusEl.textContent = 'Đang lắng nghe…';
+        addChat('sys', '🎙️ Đã bật chế độ trò chuyện giọng nói rảnh tay. Anh/chị cứ nói tự nhiên, ngừng ~1 giây Aura sẽ tự động xử lý. Bấm nút lần nữa để tắt.');
+      } else {
+        resetMicButton();
+        addChat('sys', '🔇 Đã tắt chế độ trò chuyện giọng nói.');
+      }
+    });
+
+    eventBus.on('stt:listening', () => {
+      if (stt.isConversationActive) {
+        btnMic.classList.add('recording');
+        btnMic.classList.remove('processing');
+        btnMic.textContent = MIC_ACTIVE_LABEL;
+        sttStatusEl.textContent = 'Đang lắng nghe…';
+      }
+    });
+
+    eventBus.on('stt:utterance_start', () => {
+      btnMic.classList.add('recording');
+      btnMic.textContent = '🎙️ Đang nghe bạn nói… (Bấm để tắt)';
+      sttStatusEl.textContent = 'Đang thu câu nói…';
+    });
+
+    eventBus.on('stt:processing', () => {
+      btnMic.classList.remove('recording');
+      btnMic.classList.add('processing');
+      btnMic.textContent = '⏳ Đang nhận diện giọng nói…';
+      sttStatusEl.textContent = 'Đang nhận diện…';
+    });
+
+    /** Đọc lại câu vừa nghe bằng ĐÚNG ngôn ngữ đã nhận diện (tạm dừng mic lúc Aura nói để không vọng âm) */
+    async function echoBack(res) {
+      if (!res || !res.text || !chkEcho.checked) return;
+      const lang = res.lang === 'vi' || res.lang === 'en' ? res.lang : 'auto';
+      addChat('aura', res.text, `đọc lại bằng giọng ${lang === 'vi' ? 'tiếng Việt' : 'tiếng Anh'}`);
+      stt.setPausedForReply(true);
+      sttStatusEl.textContent = 'Aura đang trả lời…';
+      try {
+        await speakWithTts(res.text, lang, '🎤 Đọc lại câu vừa nghe');
+      } finally {
+        stt.setPausedForReply(false);
+      }
+    }
+
+    eventBus.on('stt:result', async (res) => {
+      if (!res.text) {
+        if (res.source === 'mic') {
+          sttStatusEl.textContent = stt.isConversationActive ? 'Đang lắng nghe…' : 'Mic: đang tắt';
+        }
+        return;
+      }
+      addChat(
+        'user',
+        res.text,
+        `${String(res.lang).toUpperCase()} ${Math.round((res.langProb || 0) * 100)}% · STT ${res.releaseToTextMs}ms`
+      );
+      sttStatusEl.textContent = `Nghe được (${res.lang}) trong ${res.releaseToTextMs}ms`;
+      speechText.textContent = `🎤 ${res.text}`;
+      logButtonClick(
+        'STT_RESULT',
+        `lang=${res.lang}(${res.langProb}) | release→text=${res.releaseToTextMs}ms | whisper=${res.transcribeMs}ms | "${res.text}"`
+      );
+
+      // Bước 4: Nếu câu nói đến từ Micro thực tế, tự động gửi qua Bộ não AI (LLM) -> TTS + Lip-Sync + Biểu cảm
+      if (res.source === 'mic') {
+        await askBrainAndSpeak(res.text, {
+          source: 'voice-mic',
+          lang: res.lang || 'auto',
+          sttLatencyMs: res.releaseToTextMs || res.transcribeMs || 0,
+          showUserChat: false,
+          speak: chkEcho.checked
+        });
+      }
+    });
+
+    eventBus.on('stt:stopped', () => {
+      resetMicButton();
+    });
+
+    eventBus.on('stt:error', (e) => {
+      addChat(
+        'sys',
+        `Lỗi micro/STT: ${e.error}. Kiểm tra Windows > Cài đặt > Quyền riêng tư > Micrô (cho phép ứng dụng trên máy tính).`
+      );
+      resetMicButton();
+    });
+
+    eventBus.on('stt:model', (s) => {
+      if (s.state === 'loading') {
+        valStt.textContent = 'đang nạp model…';
+        valStt.className = 'tele-val warn';
+      } else if (s.state === 'ready') {
+        valStt.textContent = `đã nạp (small/int8) ${s.rssMb ? Math.round(s.rssMb) + 'MB' : ''}`;
+        valStt.className = 'tele-val good';
+      } else {
+        valStt.textContent = 'đã giải phóng (trả RAM)';
+        valStt.className = 'tele-val';
+      }
+    });
+
+    // Bấm 1 lần nút Micro (hoặc nhấn F9 / Ctrl+Space 1 lần) để Bật / Tắt chế độ trò chuyện
+    let toggleLock = false;
+    async function handleToggleVoiceChat(triggerSource) {
+      if (toggleLock) return;
+      toggleLock = true;
+      try {
+        if (!stt.isConversationActive) {
+          tts.stop();
+          logButtonClick('VOICE_CHAT_ON', `Bật chế độ trò chuyện giọng nói (${triggerSource})`);
+          await stt.startListening({ mode: 'continuous' });
+        } else {
+          logButtonClick('VOICE_CHAT_OFF', `Tắt chế độ trò chuyện giọng nói (${triggerSource})`);
+          await stt.stopListening();
+          resetMicButton();
+        }
+      } finally {
+        toggleLock = false;
+      }
+    }
+
+    btnMic.addEventListener('click', () => {
+      handleToggleVoiceChat('click nút micro');
+    });
+
+    window.addEventListener('keydown', (e) => {
+      const isF9 = e.key === 'F9';
+      const isCtrlSpace = e.ctrlKey && e.code === 'Space';
+      if (!isF9 && !isCtrlSpace) return;
+      e.preventDefault();
+      if (!e.repeat) {
+        handleToggleVoiceChat(isF9 ? 'phím F9' : 'Ctrl+Space');
+      }
+    });
+
+    // Hàm hỗ trợ kiểm thử tự động (--autotest-step3 & --autotest-step4)
+    window.__auraSttStatus = () => stt.getStatus();
+    window.__auraTestSttFromTts = async (text, lang, echo) => {
+      let t = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        t = await window.auraElectron.synthesizeSpeech({
+          id: `sttref_${Date.now()}_${attempt}`,
+          text,
+          lang,
+          voiceVi: 'vi-VN-NamMinhNeural',
+          voiceEn: 'en-US-GuyNeural',
+          emotion: 'neutral'
+        });
+        if (t && t.type === 'result' && t.audioBase64) break;
+      }
+      if (!t || t.type === 'error') return { error: (t && t.error) || 'TTS lỗi' };
+      const bin = atob(t.audioBase64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const pcm = await WhisperSTTService.decodeToPcm16k(bytes.buffer);
+      const res = await stt.transcribePcm(pcm, { source: 'tts-reference' });
+      if (echo) await echoBack(res);
+      return { ...res, refAudioSec: Number((pcm.length / 16000).toFixed(2)) };
+    };
+
+    // Hàm hỗ trợ kiểm thử tự động Bước 4 (--autotest-step4)
+    window.__auraAskBrain = async (text, opts = {}) => {
+      return askBrainAndSpeak(text, opts);
+    };
+    window.__auraVoiceToBrainFromRef = async (spokenText, lang = 'vi') => {
+      let t = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        t = await window.auraElectron.synthesizeSpeech({
+          id: `v2b_${Date.now()}_${attempt}`,
+          text: spokenText,
+          lang,
+          voiceVi: 'vi-VN-NamMinhNeural',
+          voiceEn: 'en-US-GuyNeural',
+          emotion: 'neutral'
+        });
+        if (t && t.type === 'result' && t.audioBase64) break;
+      }
+      if (!t || t.type === 'error') return { ok: false, error: (t && t.error) || 'Ref TTS failed' };
+      const bin = atob(t.audioBase64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const pcm = await WhisperSTTService.decodeToPcm16k(bytes.buffer);
+      const sttRes = await stt.transcribePcm(pcm, { source: 'voice-pipeline', lang });
+      if (!sttRes || !sttRes.text) return { ok: false, error: 'STT empty', sttRes };
+      const brainRes = await askBrainAndSpeak(sttRes.text, {
+        source: 'voice-stt',
+        lang: sttRes.lang || lang,
+        sttLatencyMs: sttRes.releaseToTextMs || sttRes.transcribeMs || 0,
+        showUserChat: false,
+        speak: true
+      });
+      return {
+        sttRes,
+        brainRes
+      };
+    };
+    window.__auraClearBrainContext = async () => {
+      const r = await brain.clearMemory();
+      updateLlmTelemetry(r);
+      return r;
+    };
+
+    // Nút "🧹 Xoá ngữ cảnh" (Xoá lịch sử hội thoại ngắn hạn 10-20 lượt)
+    if (btnClearContext) {
+      btnClearContext.addEventListener('click', async () => {
+        const res = await brain.clearMemory();
+        updateLlmTelemetry(res);
+        addChat('sys', `🧹 Đã xoá ngữ cảnh hội thoại (${res?.clearedMessages || 0} tin nhắn). Aura bắt đầu cuộc trò chuyện mới.`);
+        speechText.textContent = 'Em đã xoá bộ nhớ ngữ cảnh hội thoại trước đó. Chúng ta bắt đầu cuộc trò chuyện mới nhé!';
+        logButtonClick('🧹 Xoá ngữ cảnh', `Cleared=${res?.clearedMessages || 0} messages | HistoryTurns=0`);
+      });
+    }
+
+    // Khởi tạo trạng thái LLM ban đầu và hiển thị thông báo rõ ràng nếu thiếu key một bên
+    brain.init().then((st) => {
+      if (st) {
+        updateLlmTelemetry(st);
+        if (st.startupNotice) {
+          addChat('sys', `🧠 Bộ não AI: ${st.startupNotice}`);
+          logButtonClick('LLM_STATUS', st.startupNotice);
+        }
+      }
+    });
+
+    // ========================================================================
+    // 1. GẮN SỰ KIỆN CHO Ô NHẬP CHỮ & 2 NÚT THỬ NHANH (HỎI AI HOẶC ĐỌC TTS)
+    // ========================================================================
+    const SAMPLE_VI_TEXT =
+      'Xin chào! Em là Aura, trợ lý ảo hình người trên máy tính của anh chị. Hôm nay em có thể giúp gì cho anh chị ạ?';
+    const SAMPLE_EN_TEXT =
+      'Hello! I am Aura, your personal desktop assistant on Windows. I am ready to help you with your daily tasks!';
+
+    document.getElementById('btnSpeakVi').addEventListener('click', () => {
+      ttsInput.value = SAMPLE_VI_TEXT;
+      speakWithTts(SAMPLE_VI_TEXT, 'vi', '🇻🇳 Nói tiếng Việt');
+    });
+
+    document.getElementById('btnSpeakEn').addEventListener('click', () => {
+      ttsInput.value = SAMPLE_EN_TEXT;
+      speakWithTts(SAMPLE_EN_TEXT, 'en', '🇺🇸 Say English');
+    });
+
+    if (btnAskAi) {
+      btnAskAi.addEventListener('click', async () => {
+        const val = (ttsInput.value || '').trim();
+        if (!val) return;
+        ttsInput.value = '';
+        await askBrainAndSpeak(val, { source: 'text', sttLatencyMs: 0, showUserChat: true, speak: true });
+      });
+    }
+
+    document.getElementById('btnSpeakInput').addEventListener('click', () => {
+      speakWithTts(ttsInput.value, 'auto', '🔊 Đọc ô nhập chữ');
+    });
+
+    ttsInput.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const val = (ttsInput.value || '').trim();
+        if (!val) return;
+        ttsInput.value = '';
+        await askBrainAndSpeak(val, { source: 'text', sttLatencyMs: 0, showUserChat: true, speak: true });
+      }
+    });
+
+    // ========================================================================
+    // 2. GẮN SỰ KIỆN CHO 11 NÚT ĐIỀU KHIỂN CỦA BƯỚC 1
+    // ========================================================================
+    const emotionSampleTexts = {
+      neutral: 'Em luôn sẵn sàng lắng nghe yêu cầu của anh/chị trên máy tính này.',
+      happy: 'Tuyệt vời quá! Em rất vui khi được hỗ trợ anh/chị hôm nay!',
+      serious: 'Em đã bật chế độ kiểm tra nghiêm ngặt. Mọi thao tác nguy hiểm sẽ đều hỏi xác nhận trước.',
+      apologetic: 'Em thành thật xin lỗi vì sự bất tiện này, để em kiểm tra và khắc phục ngay ạ!'
+    };
+
+    document.querySelectorAll('[data-emotion]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-emotion]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const emo = btn.getAttribute('data-emotion');
+        avatar.setEmotion(emo);
+        emotionLabel.textContent = emotionLabels[emo] || emotionLabels.neutral;
+        speechText.textContent = emotionSampleTexts[emo] || '';
+        logButtonClick(btn.textContent.trim(), `Đổi biểu cảm sang "${emo}" thành công`);
+      });
+    });
+
+    document.getElementById('btnNod').addEventListener('click', () => {
+      avatar.triggerNod(1.0);
+      speechText.textContent = 'Dạ vâng ạ! (Aura gật đầu nhẹ xác nhận)';
+      logButtonClick('頷 Gật đầu', 'Kích hoạt chuyển động gật đầu (nodDuration=0.65s)');
+    });
+
+    document.getElementById('btnTestSpeak').addEventListener('click', () => {
+      const sample = 'Xin chào! Tôi là Aura, đang kiểm tra mấp máy môi 5 nguyên âm aa, ih, ou, ee, oh.';
+      speechText.textContent = sample;
+      avatar.speak(sample, AURA_EMOTIONS.HAPPY);
+      logButtonClick('🗣️ Thử mấp máy môi', 'Kích hoạt Lip-Sync mô phỏng 5 nguyên âm');
+    });
+
+    document.getElementById('btnToggleLite').addEventListener('click', () => {
+      manualLiteOverride = !avatar.isLiteMode;
+      avatar.setLiteMode(manualLiteOverride, manualLiteOverride ? 'Bật thủ công' : '');
+      updateLiteBadge();
+      speechText.textContent = manualLiteOverride
+        ? 'Đã bật Chế độ nhẹ (giới hạn 15 FPS, giảm độ phân giải 0.75x để tiết kiệm RAM/iGPU).'
+        : 'Đã quay lại Chế độ chuẩn (30 FPS).';
+      logButtonClick('🍃 Chế độ nhẹ', `LiteMode=${manualLiteOverride} (MaxFPS=${avatar.getStats().maxFps})`);
+    });
+
+    const vrmInput = document.getElementById('vrmFileInput');
+    document.getElementById('btnChangeVrm').addEventListener('click', () => {
+      logButtonClick('📂 Đổi VRM', 'Mở hộp thoại chọn file .vrm');
+      if (!window._autotestSuppressFileDialog) {
+        vrmInput.click();
+      }
+    });
+
+    vrmInput.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const blobUrl = URL.createObjectURL(file);
+      speechText.textContent = `Đang nạp mô hình VRM mới: ${file.name}...`;
+      try {
+        await avatar.loadModel(blobUrl);
+        speechText.textContent = `Đã đổi sang mô hình VRM: ${file.name} thành công!`;
+        logButtonClick('📂 Đổi VRM (File)', `Đã nạp ${file.name} thành công`);
+      } catch (err) {
+        speechText.textContent = `Không thể nạp file VRM: ${err.message}`;
+      }
+    });
+
+    function setUIMode(mode, btnId, btnLabel) {
+      document.body.className = `mode-${mode}`;
+      ['btnModeDocked', 'btnModeExpanded', 'btnModeFull'].forEach(id => {
+        document.getElementById(id)?.classList.remove('active-mode');
+      });
+      document.getElementById(btnId)?.classList.add('active-mode');
+
+      if (window.auraElectron) {
+        window.auraElectron.setWindowMode(mode);
+      }
+
+      setTimeout(() => avatar._onResize(), 60);
+      logButtonClick(btnLabel, `Chuyển chế độ cửa sổ sang "${mode}"`);
+    }
+
+    document.getElementById('btnModeDocked').addEventListener('click', () =>
+      setUIMode(WINDOW_MODES.DOCKED, 'btnModeDocked', '📌 Ghim')
+    );
+    document.getElementById('btnModeExpanded').addEventListener('click', () =>
+      setUIMode(WINDOW_MODES.EXPANDED, 'btnModeExpanded', '🗖 Mở rộng')
+    );
+    document.getElementById('btnModeFull').addEventListener('click', () =>
+      setUIMode(WINDOW_MODES.FULLSCREEN, 'btnModeFull', '⛶ Full')
+    );
+
+    document.getElementById('btnDevTools').addEventListener('click', () => {
+      logButtonClick('🛠️ Log', 'Bật/Tắt cửa sổ DevTools Console');
+      if (window.auraElectron) window.auraElectron.toggleDevTools();
+    });
+
+    document.getElementById('btnMinimize').addEventListener('click', () => {
+      logButtonClick('➖ Thu nhỏ', 'Thu nhỏ cửa sổ xuống Taskbar');
+      if (window.auraElectron) window.auraElectron.minimizeWindow();
+    });
+
+    document.getElementById('btnClose').addEventListener('click', () => {
+      logButtonClick('✖ Đóng', 'Đóng ứng dụng Aura');
+      if (window.auraElectron) window.auraElectron.closeWindow();
+    });
+
+    // ========================================================================
+    // 3. XỬ LÝ XUYÊN CHUỘT (CLICK-THROUGH) VÙNG AVATAR & KÉO THẢ CỬA SỔ
+    // ========================================================================
+    let lastIgnoreState = null;
+    let isDraggingWindow = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+
+    function updateClickThroughByTarget(target) {
+      if (isDraggingWindow) return;
+      const isInteractive = Boolean(
+        target &&
+        target.closest &&
+        target.closest('.interactive-ui, .top-bar, .bottom-dock, .telemetry-overlay, .tts-panel, button, input')
+      );
+      const shouldIgnore = !isInteractive;
+      if (shouldIgnore !== lastIgnoreState) {
+        lastIgnoreState = shouldIgnore;
+        if (window.auraElectron) {
+          window.auraElectron.setIgnoreMouseEvents(shouldIgnore);
+        }
+      }
+    }
+
+    window.addEventListener('mousemove', (e) => {
+      const nx = (e.clientX / window.innerWidth) * 2 - 1;
+      const ny = -((e.clientY / window.innerHeight) * 2 - 1);
+      avatar.setGazeTarget(nx, ny);
+
+      if (isDraggingWindow && window.auraElectron) {
+        const dx = e.screenX - dragStartX;
+        const dy = e.screenY - dragStartY;
+        dragStartX = e.screenX;
+        dragStartY = e.screenY;
+        if (dx !== 0 || dy !== 0) {
+          window.auraElectron.moveWindowBy(dx, dy);
+        }
+        return;
+      }
+
+      updateClickThroughByTarget(e.target);
+    });
+
+    document.getElementById('dragHandle').addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (window.auraElectron) {
+        isDraggingWindow = true;
+        dragStartX = e.screenX;
+        dragStartY = e.screenY;
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      isDraggingWindow = false;
+    });
+
+    // ========================================================================
+    // 4. KHỞI TẠO VÀ NẠP MODEL 3D VRM
+    // ========================================================================
+    const stage = document.getElementById('vrmStage');
+    await avatar.init(stage);
+
+    try {
+      const startLoad = performance.now();
+      await avatar.loadModel('../../../assets/models/aura.vrm');
+      const loadMs = Math.round(performance.now() - startLoad);
+      const stats = avatar.getStats();
+
+      document.getElementById('valTextures').textContent =
+        `<=1024px (${stats.downsampledTextures}/${stats.totalTextures} tối ưu)`;
+
+      speechText.innerHTML =
+        `Xin chào! Em là <b>Aura</b>. Đã sẵn sàng giọng đọc <b>vi-VN-HoaiMyNeural</b> & <b>en-US-AriaNeural</b>. ` +
+        `Anh/chị hãy bấm <b>"🇻🇳 Nói tiếng Việt"</b>, <b>"🇺🇸 Say English"</b> hoặc gõ câu bất kỳ vào ô bên dưới nhé!`;
+
+      console.log(`[AVATAR_READY] Loaded aura.vrm in ${loadMs}ms. Textures optimized: ${stats.downsampledTextures}/${stats.totalTextures}`);
+    } catch (err) {
+      console.error('[VRM LOAD ERROR]', err);
+      speechText.innerHTML = `<span style="color:#f87171">Lỗi tải mô hình VRM: ${err.message}</span>`;
+    }
+
+    // ========================================================================
+    // 5. CẬP NHẬT TELEMETRY (RAM / CPU / FPS) & THANH ĐO LIP-SYNC REALTIME
+    // ========================================================================
+    setInterval(() => {
+      const stats = avatar.getStats();
+      const pct = Math.min(100, Math.round(stats.audioRms * 140));
+      lipSyncMeterFill.style.width = `${pct}%`;
+      lipSyncRmsLabel.textContent = `LipSync: ${pct}%`;
+    }, 60);
+
+    setInterval(() => {
+      const stats = avatar.getStats();
+      document.getElementById('valFps').textContent = `${stats.fps} / ${stats.maxFps}`;
+      updateLiteBadge();
+      if (window.auraElectron) {
+        window.auraElectron.reportFps(stats.fps, stats.isLiteMode);
+      }
+    }, 500);
+
+    function handleHostTelemetry(data) {
+      const auraRamEl = document.getElementById('valAuraRam');
+      const sysRamEl = document.getElementById('valSysRam');
+      const auraCpuEl = document.getElementById('valAuraCpu');
+
+      auraRamEl.textContent = `${data.auraRamMb.toFixed(1)} MB / 2500 MB`;
+      auraRamEl.className = 'tele-val ' + (data.auraRamMb < 1500 ? 'good' : data.auraRamMb < 2200 ? 'warn' : 'crit');
+
+      sysRamEl.textContent = `${data.sysRamPercent}% (${data.sysUsedGb.toFixed(1)}/${data.sysTotalGb.toFixed(1)} GB)`;
+      sysRamEl.className = 'tele-val ' + (data.sysRamPercent < 85 ? 'good' : data.sysRamPercent < 90 ? 'warn' : 'crit');
+
+      auraCpuEl.textContent = `${data.auraCpuPercent.toFixed(1)}%`;
+      auraCpuEl.className = 'tele-val ' + (data.auraCpuPercent < 15 ? 'good' : 'warn');
+
+      if (data.sysRamPercent >= 90 && !avatar.isLiteMode) {
+        avatar.setLiteMode(true, `Sys RAM ${data.sysRamPercent}% >= 90%`);
+        updateLiteBadge();
+      } else if (data.sysRamPercent < 88 && avatar.isLiteMode && !manualLiteOverride) {
+        avatar.setLiteMode(false);
+        updateLiteBadge();
+      }
+    }
+
+    function handleEmergencyStop() {
+      tts.stop();
+      stt.cancel();
+      resetMicButton();
+      speechText.innerHTML = `<b style="color:#f87171">🛑 [KHẨN CẤP - Ctrl+Alt+Esc] Đã dừng ngay lập tức mọi thao tác và giọng nói của Aura!</b>`;
+      logButtonClick('Ctrl+Alt+Esc', 'Dừng khẩn cấp toàn bộ hoạt động');
+    }
+
+    if (window.auraElectron) {
+      window.auraElectron.onTelemetry(handleHostTelemetry);
+      window.auraElectron.onEmergencyStop(handleEmergencyStop);
+    }
+
+    // ========================================================================
+    // BƯỚC 5: HỘP THOẠI XÁC NHẬN AN TOÀN, AUDIT LOG & LỜI NHẮC HẸN GIỜ
+    // ========================================================================
+
+    const confirmModal = document.getElementById('confirmModal');
+    const confirmTitle = document.getElementById('confirmTitle');
+    const confirmDesc = document.getElementById('confirmDesc');
+    const confirmTimerBadge = document.getElementById('confirmTimerBadge');
+    const confirmProgressBar = document.getElementById('confirmProgressBar');
+    const btnConfirmApprove = document.getElementById('btnConfirmApprove');
+    const btnConfirmCancel = document.getElementById('btnConfirmCancel');
+
+    let activeConfirmId = null;
+    let confirmCountdownTimer = null;
+    let confirmSecondsLeft = 30;
+
+    function closeConfirmModal() {
+      if (confirmCountdownTimer) {
+        clearInterval(confirmCountdownTimer);
+        confirmCountdownTimer = null;
+      }
+      confirmModal.style.display = 'none';
+      activeConfirmId = null;
+    }
+
+    if (window.auraElectron) {
+      // 1. Nhận yêu cầu xác nhận an toàn từ Main Process
+      window.auraElectron.onToolConfirmRequest((payload) => {
+        activeConfirmId = payload.id;
+        confirmTitle.innerHTML = payload.risk?.dialogTitle || '⚠️ Xác nhận an toàn';
+        confirmDesc.innerHTML = payload.risk?.description || 'Aura chuẩn bị thực hiện một hành động có rủi ro cao.';
+        confirmSecondsLeft = 30;
+        confirmTimerBadge.textContent = '30s';
+        confirmProgressBar.style.width = '100%';
+        confirmModal.style.display = 'flex';
+
+        if (confirmCountdownTimer) clearInterval(confirmCountdownTimer);
+        const startT = Date.now();
+        confirmCountdownTimer = setInterval(() => {
+          const elapsed = (Date.now() - startT) / 1000;
+          const remain = Math.max(0, 30 - elapsed);
+          confirmSecondsLeft = Math.ceil(remain);
+          confirmTimerBadge.textContent = `${confirmSecondsLeft}s`;
+          confirmProgressBar.style.width = `${(remain / 30) * 100}%`;
+          if (remain <= 0) {
+            closeConfirmModal();
+          }
+        }, 200);
+
+        // Aura hỏi lại người dùng bằng giọng nói với biểu cảm serious
+        if (payload.spokenPrompt && chkEcho.checked) {
+          speakWithTts(payload.spokenPrompt, 'vi', '⚠️ Hỏi xác nhận an toàn', 'serious');
+        }
+      });
+
+      // 2. Nhận sự kiện huỷ xác nhận (khi bấm Ctrl+Alt+Esc)
+      window.auraElectron.onToolConfirmCancel((data) => {
+        closeConfirmModal();
+        addChat('sys', `Đã huỷ xác nhận công cụ (lý do: ${data?.reason || 'khẩn cấp'}).`);
+      });
+
+      // 3. Nhận sự kiện kích hoạt lời nhắc hẹn giờ
+      window.auraElectron.onReminderTrigger((reminder) => {
+        const toast = document.getElementById('reminderToast');
+        const toastMsg = document.getElementById('reminderToastMsg');
+        toastMsg.textContent = `${reminder.message} (${reminder.triggerAt})`;
+        toast.style.display = 'flex';
+
+        addChat('aura', `⏰ LỜI NHẮC: ${reminder.message}`, `Hẹn giờ ${reminder.minutes} phút`);
+        speechText.innerHTML = `⏰ <b>LỜI NHẮC:</b> ${reminder.message}`;
+        applyEmotionToUiAndAvatar('happy', 'happy');
+
+        if (chkEcho.checked) {
+          speakWithTts(`Anh ơi, đến giờ rồi: ${reminder.message}!`, 'vi', '⏰ Lời nhắc', 'happy');
+        }
+      });
+    }
+
+    btnConfirmApprove.addEventListener('click', () => {
+      if (activeConfirmId && window.auraElectron) {
+        const cid = activeConfirmId;
+        closeConfirmModal();
+        window.auraElectron.toolConfirmResponse(cid, true);
+        logButtonClick('✅ Đồng ý thực hiện', `ConfirmId=${cid}`);
+      }
+    });
+
+    btnConfirmCancel.addEventListener('click', () => {
+      if (activeConfirmId && window.auraElectron) {
+        const cid = activeConfirmId;
+        closeConfirmModal();
+        window.auraElectron.toolConfirmResponse(cid, false);
+        logButtonClick('❌ Huỷ thực hiện', `ConfirmId=${cid}`);
+      }
+    });
+
+    document.getElementById('btnDismissReminder').addEventListener('click', () => {
+      document.getElementById('reminderToast').style.display = 'none';
+    });
+
+    // Quản lý Modal Xem Log Công cụ (btnViewLogs)
+    const logModal = document.getElementById('logModal');
+    const logTableContainer = document.getElementById('logTableContainer');
+    const btnViewLogs = document.getElementById('btnViewLogs');
+    const btnCloseLogModal = document.getElementById('btnCloseLogModal');
+    const btnDoneLogs = document.getElementById('btnDoneLogs');
+    const btnRefreshLogs = document.getElementById('btnRefreshLogs');
+
+    async function renderAuditLogs() {
+      if (!window.auraElectron || !window.auraElectron.getToolLogs) {
+        logTableContainer.innerHTML = '<div style="color:#f87171;padding:12px;">Không hỗ trợ IPC getToolLogs</div>';
+        return;
+      }
+      logTableContainer.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:16px;">Đang tải dữ liệu...</div>';
+      try {
+        const logs = await window.auraElectron.getToolLogs(35);
+        if (!logs || !logs.length) {
+          logTableContainer.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:20px;">Chưa có công cụ nào được gọi trong phiên làm việc này.</div>';
+          return;
+        }
+
+        let html = `
+          <table class="log-table">
+            <thead>
+              <tr>
+                <th style="width:70px">Thời gian</th>
+                <th style="width:110px">Công cụ</th>
+                <th>Tham số</th>
+                <th style="width:85px">Xác nhận</th>
+                <th style="width:85px">Kết quả</th>
+              </tr>
+            </thead>
+            <tbody>
+        `;
+
+        for (const item of logs) {
+          const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleTimeString('vi-VN') : '--';
+          const confTag =
+            item.confirmed === true
+              ? '<span class="log-tag confirmed">ĐÃ ĐỒNG Ý</span>'
+              : item.confirmed === false
+                ? '<span class="log-tag failed">BỊ TỪ CHỐI</span>'
+                : '<span class="log-tag safe">KHÔNG CẦN</span>';
+
+          const statusTag = item.success
+            ? '<span class="log-tag success">THÀNH CÔNG</span>'
+            : '<span class="log-tag failed">THẤT BẠI</span>';
+
+          const argsStr = escapeHtml(JSON.stringify(item.args || {}));
+          const resPreview = escapeHtml(
+            item.result?.message || item.result?.error || JSON.stringify(item.result || {})
+          );
+
+          html += `
+            <tr>
+              <td>${timeStr}</td>
+              <td><b>${escapeHtml(item.tool || '')}</b></td>
+              <td><code>${argsStr}</code></td>
+              <td>${confTag}</td>
+              <td>${statusTag}<br/><small style="color:#94a3b8">${resPreview}</small></td>
+            </tr>
+          `;
+        }
+
+        html += '</tbody></table>';
+        logTableContainer.innerHTML = html;
+      } catch (err) {
+        logTableContainer.innerHTML = `<div style="color:#f87171;padding:12px;">Lỗi lấy audit log: ${err.message}</div>`;
+      }
+    }
+
+    btnViewLogs.addEventListener('click', () => {
+      logModal.style.display = 'flex';
+      renderAuditLogs();
+      logButtonClick('📋 Xem log', 'Mở bảng lịch sử gọi công cụ');
+    });
+
+    btnCloseLogModal.addEventListener('click', () => { logModal.style.display = 'none'; });
+    btnDoneLogs.addEventListener('click', () => { logModal.style.display = 'none'; });
+    btnRefreshLogs.addEventListener('click', renderAuditLogs);
+
+    // ========================================================================
+    // BƯỚC 6: COMPUTER-USE (AUTO-PILOT, VIỀN SÁNG ĐIỀU KHIỂN & TOAST CHỤP MÀN HÌNH)
+    // ========================================================================
+    const btnAutoPilot = document.getElementById('btnAutoPilot');
+    const computerUseGlow = document.getElementById('computerUseGlow');
+    const computerUseBadge = document.getElementById('computerUseBadge');
+    const screenshotToast = document.getElementById('screenshotToast');
+    let autoPilotActive = false;
+    let screenshotToastTimer = null;
+
+    if (btnAutoPilot && window.auraElectron) {
+      btnAutoPilot.addEventListener('click', async () => {
+        try {
+          const target = !autoPilotActive;
+          const status = await window.auraElectron.computerUseSetAutoPilot(target);
+          autoPilotActive = Boolean(status?.enabled);
+          if (autoPilotActive) {
+            btnAutoPilot.classList.add('active');
+            btnAutoPilot.textContent = '⚡ Tự động (10:00)';
+            addChat('sys', '⚡ Đã BẬT chế độ Tự động điều khiển trong 10 phút (không hỏi xác nhận các thao tác an toàn).');
+          } else {
+            btnAutoPilot.classList.remove('active');
+            btnAutoPilot.textContent = '⚡ Tự động (10p)';
+            addChat('sys', '🔒 Đã TẮT chế độ Tự động điều khiển. Quay lại hỏi xác nhận từng thao tác chuột/phím.');
+          }
+        } catch (e) {
+          console.error('Lỗi toggle auto-pilot:', e);
+        }
+      });
+
+      // Lắng nghe trạng thái Computer-Use từ Electron Main
+      window.auraElectron.onComputerUseState((state) => {
+        // 1. Viền sáng và huy hiệu "Aura đang điều khiển máy"
+        if (state.running) {
+          computerUseGlow.classList.remove('hidden');
+          computerUseBadge.classList.remove('hidden');
+          computerUseBadge.innerHTML = `<span class="pulse-dot"></span> 🤖 Aura đang điều khiển máy (${state.step || 0}/${state.maxSteps || 15})...`;
+        } else {
+          computerUseGlow.classList.add('hidden');
+          computerUseBadge.classList.add('hidden');
+        }
+
+        // 2. Cập nhật nút đếm ngược Auto-Pilot
+        autoPilotActive = Boolean(state.autoPilot);
+        if (state.autoPilot && state.autoPilotRemainingSec > 0) {
+          btnAutoPilot.classList.add('active');
+          const m = Math.floor(state.autoPilotRemainingSec / 60);
+          const s = state.autoPilotRemainingSec % 60;
+          btnAutoPilot.textContent = `⚡ Tự động (${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')})`;
+        } else {
+          btnAutoPilot.classList.remove('active');
+          btnAutoPilot.textContent = '⚡ Tự động (10p)';
+        }
+      });
+
+      // Lắng nghe sự kiện chụp màn hình để hiện toast
+      window.auraElectron.onScreenshotToast(() => {
+        if (screenshotToastTimer) clearTimeout(screenshotToastTimer);
+        screenshotToast.classList.remove('hidden');
+        screenshotToastTimer = setTimeout(() => {
+          screenshotToast.classList.add('hidden');
+        }, 1200);
+      });
+
+      // Lắng nghe phát ngôn từng bước của Computer Use
+      window.auraElectron.onSpokenNotice((notice) => {
+        if (!notice || !notice.text) return;
+        speechText.textContent = notice.text;
+        addChat('aura', notice.text, '🤖 Computer Use');
+        if (chkEcho.checked) {
+          speakWithTts(notice.text, 'vi', '🤖 Điều khiển máy', notice.emotion || 'neutral');
+        }
+      });
+    }
+  </script>
+</body>
+</html>

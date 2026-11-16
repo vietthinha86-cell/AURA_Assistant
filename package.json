@@ -1,0 +1,23 @@
+{
+  "name": "aura-desktop-assistant",
+  "version": "1.0.0",
+  "description": "AURA - Trợ Lý Ảo Hình Người VRM Trên Windows Desktop",
+  "main": "src/module_a_shell/electron_main.js",
+  "scripts": {
+    "start": "electron .",
+    "test:buttons": "electron . --autotest-buttons",
+    "test:step2": "electron . --autotest-step2",
+    "test:step3": "electron . --autotest-step3",
+    "test:step4": "electron . --autotest-step4",
+    "test:step5": "electron . --autotest-step5",
+    "test:step6": "electron . --autotest-step6"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "^2.1.0",
+    "playwright": "^1.65.0",
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "electron": "^41.2.0"
+  }
+}

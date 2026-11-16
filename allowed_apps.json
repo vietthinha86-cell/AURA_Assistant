@@ -1,0 +1,96 @@
+{
+  "notepad": {
+    "name": "Notepad",
+    "aliases": ["notepad", "ghi chú", "soạn thảo văn bản", "sổ tay"],
+    "processName": "notepad.exe",
+    "executable": "notepad.exe",
+    "searchPaths": [
+      "C:\\Windows\\System32\\notepad.exe",
+      "notepad.exe"
+    ]
+  },
+  "calculator": {
+    "name": "Calculator",
+    "aliases": ["calc", "calculator", "máy tính", "bàn tính"],
+    "processName": "CalculatorApp.exe",
+    "killNames": ["CalculatorApp.exe", "calc.exe"],
+    "executable": "calc.exe",
+    "searchPaths": [
+      "C:\\Windows\\System32\\calc.exe",
+      "calc.exe"
+    ]
+  },
+  "explorer": {
+    "name": "File Explorer",
+    "aliases": ["explorer", "quản lý file", "thư mục", "tập tin", "trình duyệt tệp"],
+    "processName": "explorer.exe",
+    "executable": "explorer.exe",
+    "searchPaths": [
+      "C:\\Windows\\explorer.exe",
+      "explorer.exe"
+    ]
+  },
+  "chrome": {
+    "name": "Google Chrome",
+    "aliases": ["chrome", "google chrome", "trình duyệt chrome", "trình duyệt web chrome"],
+    "processName": "chrome.exe",
+    "executable": "chrome.exe",
+    "searchPaths": [
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+      "%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe"
+    ]
+  },
+  "edge": {
+    "name": "Microsoft Edge",
+    "aliases": ["edge", "msedge", "microsoft edge", "trình duyệt edge"],
+    "processName": "msedge.exe",
+    "executable": "msedge.exe",
+    "searchPaths": [
+      "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+      "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+      "msedge.exe"
+    ]
+  },
+  "word": {
+    "name": "Microsoft Word",
+    "aliases": ["word", "winword", "microsoft word", "văn bản word"],
+    "processName": "WINWORD.EXE",
+    "executable": "WINWORD.EXE",
+    "searchPaths": [
+      "C:\\PROGRA~1\\MICROS~2\\Office15\\WINWORD.EXE",
+      "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+      "C:\\Program Files (x86)\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+      "C:\\Program Files\\Microsoft Office\\Office15\\WINWORD.EXE",
+      "C:\\Program Files (x86)\\Microsoft Office\\Office15\\WINWORD.EXE",
+      "winword.exe"
+    ]
+  },
+  "excel": {
+    "name": "Microsoft Excel",
+    "aliases": ["excel", "bảng tính", "microsoft excel", "bảng tính excel"],
+    "processName": "EXCEL.EXE",
+    "executable": "EXCEL.EXE",
+    "searchPaths": [
+      "C:\\PROGRA~1\\MICROS~2\\Office15\\EXCEL.EXE",
+      "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "C:\\Program Files (x86)\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "C:\\Program Files\\Microsoft Office\\Office15\\EXCEL.EXE",
+      "C:\\Program Files (x86)\\Microsoft Office\\Office15\\EXCEL.EXE",
+      "excel.exe"
+    ]
+  },
+  "vscode": {
+    "name": "Visual Studio Code",
+    "aliases": ["vscode", "code", "vs code", "visual studio code"],
+    "processName": "Code.exe",
+    "executable": "Code.exe",
+    "searchPaths": [
+      "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe",
+      "C:\\Program Files\\Microsoft VS Code\\Code.exe",
+      "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\bin\\code.cmd",
+      "code.cmd"
+    ]
+  }
+}
+

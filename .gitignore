@@ -1,0 +1,33 @@
+# Dependencies & Package Manager Caches
+node_modules/
+/.npm_cache/
+
+# Secrets & Environment Variables (NEVER commit real API keys)
+.env
+.env.local
+.env.*.local
+
+# Python Portable Runtime & Local AI Models (too large for Git / machine-specific)
+/runtime/
+/models/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs, Test Reports, Screenshots & Local Runtime State
+/logs/
+/reports/
+/projects_cache.json
+/benchmark_audio/
+/test_audio_vi.*
+/OK
+
+# .NET / C# Build Artifacts
+src/**/bin/
+src/**/obj/
+
+# OS & Editor Artifacts
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
