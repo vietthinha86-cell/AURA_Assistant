@@ -122,17 +122,19 @@ File `preferences.json` lưu trữ các thiết lập thói quen của bạn:
 
 ---
 
-## 5. Cấu Hình Bộ Não AI (`.env`)
+## 5. Cấu Hình Bộ Não AI Kép — Dual-Brain (`.env`)
 
-Mở file **`.env`** tại thư mục gốc để tuỳ chỉnh API Key và Model:
+Mở file **`.env`** tại thư mục gốc để tuỳ chỉnh API Key và chế độ chạy 2 AI song song (`Auto` phân luồng thông minh + tự cứu nhau khi lỗi/hết quota):
 ```ini
-DEFAULT_PROVIDER=gemini
+DEFAULT_PROVIDER=auto
 GEMINI_API_KEY=AIzaSy...
 GEMINI_MODEL=gemini-3.5-flash-lite
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-3-5-sonnet-latest
 ```
-*(Nếu chưa có key Anthropic Claude, Aura sẽ tự động kích hoạt chế độ dự phòng bằng Gemini mà không gây gián đoạn hoạt động).*
+- **Chế độ `⚡ Auto` (Mặc định):** Khi có cả 2 key, tác vụ nhanh/hàng ngày (mở app, tìm file, YouTube, trò chuyện nhanh) tự chạy bằng **Gemini**, còn tác vụ phức tạp (sửa code, debug, phân tích lỗi sâu, Computer-Use Vision) tự ưu tiên **Claude**. Bất kỳ bên nào gặp lỗi (`429` hết quota / mạng / `5xx`) sẽ tự động chuyển nóng sang bên còn lại ngay trong cùng lượt gọi.
+- **Chuyển nhanh trên UI:** Trên bảng thông số góc trái của Aura có sẵn 3 nút **`⚡ Auto` / `✨ Gemini` / `🧠 Claude`** để đổi bộ não bất kỳ lúc nào mà vẫn giữ nguyên trí nhớ hội thoại.
+- *(Nếu chưa có `ANTHROPIC_API_KEY`, Aura tự chạy ổn định bằng Gemini và giữ Claude ở chế độ chờ mà không gây gián đoạn).*
 
 ---
 

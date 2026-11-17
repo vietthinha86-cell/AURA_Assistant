@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('auraElectron', {
   sttUnload: () => ipcRenderer.invoke('stt:unload'),
   sttSetConversationActive: (active) => ipcRenderer.invoke('stt:set_conversation_active', active),
   llmStatus: () => ipcRenderer.invoke('llm:status'),
+  llmSetMode: (mode) => ipcRenderer.invoke('llm:set-mode', mode),
   llmChat: (payload) => ipcRenderer.invoke('llm:chat', payload),
   llmVision: (payload) => ipcRenderer.invoke('llm:vision', payload),
   llmClearContext: () => ipcRenderer.invoke('llm:clear-context'),

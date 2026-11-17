@@ -600,6 +600,10 @@ ipcMain.handle('llm:status', async () => {
   return ensureLlmRouter().getPublicStatus();
 });
 
+ipcMain.handle('llm:set-mode', async (_event, mode) => {
+  return ensureLlmRouter().setRoutingMode(mode);
+});
+
 ipcMain.handle('llm:chat', async (_event, payload) => {
   const router = ensureLlmRouter();
   return router.chatWithMemory(payload.text || '', {

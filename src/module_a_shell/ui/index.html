@@ -73,7 +73,12 @@
       </div>
       <div class="tele-row">
         <span class="tele-label">LLM Brain:</span>
-        <span class="tele-val good" id="valLlm">Gemini (0 lượt nhớ)</span>
+        <span class="tele-val good" id="valLlm">Auto / Gemini (0 lượt nhớ)</span>
+      </div>
+      <div class="llm-mode-row" id="llmModeSwitch" title="Chuyển chế độ bộ não AI: Auto (Gemini + Claude tự phối hợp) / Gemini / Claude">
+        <button class="llm-pill active" data-llm-mode="auto" title="Tự chọn AI phù hợp & tự cứu khi lỗi">⚡ Auto</button>
+        <button class="llm-pill" data-llm-mode="gemini" title="Ưu tiên Gemini (có dự phòng Claude)">✨ Gemini</button>
+        <button class="llm-pill" data-llm-mode="claude" title="Ưu tiên Claude (cần ANTHROPIC_API_KEY trong .env)">🧠 Claude</button>
       </div>
       <div class="tele-row">
         <span class="tele-label">Textures:</span>
@@ -379,11 +384,27 @@
 
     function updateLlmTelemetry(statusObj) {
       if (!valLlm || !statusObj) return;
-      const prov = (statusObj.activeProvider || 'gemini').toUpperCase();
+      const mode = (statusObj.routingMode || 'auto').toLowerCase();
+      const prov = (statusObj.activeProvider || statusObj.provider || 'gemini').toUpperCase();
       const turns = statusObj.historyTurns ?? 0;
       const maxTurns = statusObj.maxTurns ?? 15;
-      valLlm.textContent = `${prov} (${turns}/${maxTurns} lượt nhớ)`;
+      const dualTag = statusObj.dualBrainReady ? 'Dual' : '1-Key';
+      valLlm.textContent = mode === 'auto'
+        ? `AUTO[${dualTag}]→${prov} (${turns}/${maxTurns})`
+        : `${prov} (${turns}/${maxTurns} nhớ)`;
       valLlm.className = 'tele-val good';
+
+      document.querySelectorAll('[data-llm-mode]').forEach((btn) => {
+        const bMode = btn.getAttribute('data-llm-mode');
+        btn.classList.toggle('active', bMode === mode);
+        if (bMode === 'claude' && statusObj.claudeConfigured === false) {
+          btn.classList.add('unconfigured');
+          btn.title = 'Chưa có ANTHROPIC_API_KEY trong .env (vào .env điền key Claude để dùng)';
+        } else if (bMode === 'claude') {
+          btn.classList.remove('unconfigured');
+          btn.title = 'Ưu tiên Claude (có dự phòng Gemini)';
+        }
+      });
     }
 
     function applyEmotionToUiAndAvatar(emotionTag, avatarEmotionTag) {
@@ -478,6 +499,9 @@
       }
       if (!llmRes.ok && llmRes.errorCode) {
         metaParts.push(`LỖI: ${llmRes.errorCode}`);
+      }
+      if (llmRes.fallbackNote) {
+        addChat('sys', `🔄 ${llmRes.fallbackNote}`);
       }
 
       addChat('aura', llmRes.text, metaParts.join(' · '));
@@ -791,6 +815,31 @@
         logButtonClick('🧹 Xoá ngữ cảnh', `Cleared=${res?.clearedMessages || 0} messages | HistoryTurns=0`);
       });
     }
+
+    // Nút gạt chuyển chế độ bộ não AI: Auto / Gemini / Claude
+    document.querySelectorAll('[data-llm-mode]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const targetMode = btn.getAttribute('data-llm-mode');
+        const res = await brain.setRoutingMode(targetMode);
+        if (res && res.ok === false && res.error) {
+          addChat('sys', `⚠️ ${res.error}`);
+          speechText.textContent = res.error;
+          updateLlmTelemetry(res);
+          return;
+        }
+        if (res) {
+          updateLlmTelemetry(res);
+          const desc =
+            targetMode === 'auto'
+              ? (res.dualBrainReady
+                  ? '⚡ Đã bật chế độ Auto (Dual-Brain): tự phân luồng giữa Gemini & Claude và tự cứu nhau khi lỗi.'
+                  : '⚡ Đã bật chế độ Auto (hiện chạy Gemini; sẽ tự ghép đôi Claude ngay khi anh điền ANTHROPIC_API_KEY vào .env).')
+              : `🧠 Đã chuyển bộ não chính sang ${targetMode.toUpperCase()} (giữ nguyên trí nhớ hội thoại).`;
+          addChat('sys', desc);
+          logButtonClick(`🧠 Đổi AI -> ${targetMode}`, `Mode=${res.routingMode} | Active=${res.activeProvider}`);
+        }
+      });
+    });
 
     // Khởi tạo trạng thái LLM ban đầu và hiển thị thông báo rõ ràng nếu thiếu key một bên
     brain.init().then((st) => {

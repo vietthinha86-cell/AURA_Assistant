@@ -105,6 +105,18 @@ export class AuraBrainService extends IBrainProvider {
     return this.status;
   }
 
+  async setRoutingMode(mode) {
+    if (!window.auraElectron || !window.auraElectron.llmSetMode) {
+      return null;
+    }
+    const res = await window.auraElectron.llmSetMode(mode);
+    this.status = res;
+    if (this.eventBus) {
+      this.eventBus.emit('llm:status', res);
+    }
+    return res;
+  }
+
   async processUserMessage(text, language = 'auto', context = {}) {
     if (!window.auraElectron || !window.auraElectron.llmChat) {
       throw new Error('Không tìm thấy cầu nối IPC window.auraElectron.llmChat');
