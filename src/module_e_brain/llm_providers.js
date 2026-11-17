@@ -369,6 +369,25 @@ function buildAuraSystemPrompt(langHint = 'auto') {
 }
 
 /**
+ * System prompt gọn nhẹ (~160 tokens) dành riêng cho các model free-tier bị giới hạn TPM (Groq, OpenRouter)
+ */
+function buildAuraCompactSystemPrompt(langHint = 'auto') {
+  const langRule =
+    langHint === 'en'
+      ? 'Reply in natural English (en).'
+      : langHint === 'vi'
+        ? 'Trả lời bằng Tiếng Việt tự nhiên (xưng "em", gọi "anh/chị").'
+        : 'Reply in the same language as the user (vi or en).';
+
+  return [
+    'You are Aura, a warm, honest Windows female desktop assistant.',
+    `Rules: Keep "reply" concise (1-2 short plain sentences, no markdown/emojis). ${langRule}`,
+    'Truthfulness: Only report an action as done if the tool actually returned success: true; otherwise state the exact failure honestly.',
+    'Respond ONLY with JSON: {"reply": "<short plain text>", "emotion": "<neutral|happy|serious|sorry>", "language": "<vi|en>"}'
+  ].join('\n');
+}
+
+/**
  * Hàm gọi HTTPS POST JSON thuần Node.js (ưu tiên IPv4 để không bị treo timeout IPv6 trên Windows)
  */
 function httpsPostJson({ hostname, path: reqPath, headers = {}, bodyObj, timeoutMs = 20000 }) {
@@ -435,7 +454,7 @@ function classifyProviderError(providerName, statusCode, rawErrorText, lang = 'v
     code = 'INVALID_API_KEY';
   } else if (statusCode === 401 || statusCode === 403 || lower.includes('authentication') || lower.includes('invalid api key') || lower.includes('unauthenticated')) {
     code = 'INVALID_API_KEY';
-  } else if (statusCode === 429 || lower.includes('quota') || lower.includes('rate_limit') || lower.includes('resource_exhausted') || lower.includes('credit balance')) {
+  } else if (statusCode === 413 || statusCode === 429 || lower.includes('quota') || lower.includes('rate_limit') || lower.includes('resource_exhausted') || lower.includes('credit balance') || lower.includes('itpm') || lower.includes('tpm') || lower.includes('request too large')) {
     code = 'QUOTA_EXCEEDED';
   } else if (
     lower.includes('enotfound') ||
@@ -1209,7 +1228,7 @@ class OpenAICompatibleProvider extends LLMProvider {
   constructor(config = {}) {
     super({
       name: config.name || 'groq',
-      model: config.model || 'llama-3.3-70b-versatile',
+      model: config.model || 'openai/gpt-oss-120b',
       apiKey: config.apiKey || ''
     });
     this.label = config.label || this.name.toUpperCase();
@@ -1338,7 +1357,7 @@ class OpenAICompatibleProvider extends LLMProvider {
 
   async chat(messages, tools = [], options = {}) {
     const langHint = options.langHint || 'auto';
-    const systemPrompt = options.systemPrompt || buildAuraSystemPrompt(langHint);
+    const systemPrompt = options.systemPrompt || buildAuraCompactSystemPrompt(langHint);
     const openAiMessages = this._buildOpenAIMessages(messages, systemPrompt);
     const bodyObj = {
       model: this.model,
@@ -1380,7 +1399,10 @@ class OpenAICompatibleProvider extends LLMProvider {
 
   async vision(image, prompt, options = {}) {
     const langHint = options.langHint || detectTextLanguage(prompt, 'vi');
-    const systemPrompt = options.systemPrompt || buildAuraSystemPrompt(langHint);
+    const systemPrompt = options.systemPrompt || (
+      'You are Aura, a concise desktop visual assistant. Inspect the screenshot carefully and answer ONLY with a valid JSON object: ' +
+      '{"reply": "<short plain response>", "emotion": "<neutral|happy|serious|sorry>", "language": "<vi|en>"}'
+    );
     let dataUrl = String(image || '');
     if (!dataUrl.startsWith('data:')) {
       dataUrl = `data:image/png;base64,${dataUrl}`;
@@ -1571,7 +1593,7 @@ class AuraLLMRouter {
       hostname: 'api.groq.com',
       apiPath: '/openai/v1/chat/completions',
       apiKey: String(parsed.GROQ_API_KEY || '').trim(),
-      model: String(parsed.GROQ_MODEL || 'llama-3.3-70b-versatile').trim(),
+      model: String(parsed.GROQ_MODEL || 'openai/gpt-oss-120b').trim(),
       visionModel: String(parsed.GROQ_VISION_MODEL || 'qwen/qwen3.8-27b').trim()
     });
     this.openrouterProvider = new OpenAICompatibleProvider({
@@ -1646,7 +1668,7 @@ class AuraLLMRouter {
       geminiConfigured,
       geminiModel: this.geminiProvider?.model || 'gemini-3.5-flash-lite',
       groqConfigured,
-      groqModel: this.groqProvider?.model || 'llama-3.3-70b-versatile',
+      groqModel: this.groqProvider?.model || 'openai/gpt-oss-120b',
       openrouterConfigured,
       openrouterModel: this.openrouterProvider?.model || 'openrouter/free',
       claudeConfigured,
@@ -1918,11 +1940,16 @@ class AuraLLMRouter {
       { role: 'user', content: cleanUserText }
     ];
 
+    const OPEN_AI_ACTION_INTENT_REGEX =
+      /\b(mở|mo|đóng|dong|tìm|tim|đọc|doc|ghi|sửa|sua|tạo|tao|hoàn tác|undo|test|kiểm tra|chạy|chay|quét|quet|youtube|livestream|live|web|api|url|http|file|thư mục|thu muc|folder|dự án|du an|project|clipboard|nhắc|nhac|hẹn|hen|chụp|chup|bấm|bam|cuộn|cuon|gõ|go|calculator|notepad|open|close|find|read|write|edit|run|check|search|play|watch|remind|click|scroll|sở thích|so thich)\b/i;
+
     const getToolsFor = (prov) => {
       if (options.tools && options.tools.length) return options.tools;
       if (prov.name === 'claude') return convertToolsForClaude(NEUTRAL_TOOLS);
       if (prov.name === 'gemini') return convertToolsForGemini(NEUTRAL_TOOLS);
-      return convertToolsForOpenAI(NEUTRAL_TOOLS);
+      return OPEN_AI_ACTION_INTENT_REGEX.test(cleanUserText)
+        ? convertToolsForOpenAI(NEUTRAL_TOOLS, { compact: true })
+        : [];
     };
 
     // TURN 1: Gửi yêu cầu người dùng tới LLM (hỗ trợ Dual-Brain Smart Routing & Failover nóng)
@@ -2028,7 +2055,7 @@ class AuraLLMRouter {
           call.id || `call_${Date.now()}`,
           toolName,
           toolResult,
-          { langHint: detectedInputLang, tools: toolsForProvider }
+          { langHint: detectedInputLang, tools: [] }
         );
       }
 

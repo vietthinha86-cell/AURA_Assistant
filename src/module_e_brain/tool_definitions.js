@@ -898,20 +898,35 @@ function convertToolsForClaude(tools = NEUTRAL_TOOLS) {
 
 /**
  * Chuyển schema sang chuẩn OpenAI Chat Completions (dùng chung cho Groq, OpenRouter...)
+ * Hỗ trợ compact=true để giữ payload nhỏ gọn dưới ngưỡng TPM của free-tier (ví dụ Groq 7k-8k TPM)
  */
-function convertToolsForOpenAI(tools = NEUTRAL_TOOLS) {
-  return tools.map((t) => ({
-    type: 'function',
-    function: {
-      name: t.name,
-      description: t.description || '',
-      parameters: {
-        type: 'object',
-        properties: t.parameters?.properties || {},
-        required: t.parameters?.required || []
-      }
+function convertToolsForOpenAI(tools = NEUTRAL_TOOLS, options = {}) {
+  const compact = Boolean(options.compact);
+  return tools.map((t) => {
+    const rawProps = t.parameters?.properties || {};
+    const properties = {};
+    for (const [k, v] of Object.entries(rawProps)) {
+      properties[k] = compact
+        ? { type: v.type || 'string' }
+        : v;
     }
-  }));
+    const rawDesc = String(t.description || '');
+    const description = compact
+      ? rawDesc.split(/[.:(\n]/)[0].trim().slice(0, 65)
+      : rawDesc;
+    return {
+      type: 'function',
+      function: {
+        name: t.name,
+        description,
+        parameters: {
+          type: 'object',
+          properties,
+          required: t.parameters?.required || []
+        }
+      }
+    };
+  });
 }
 
 module.exports = {

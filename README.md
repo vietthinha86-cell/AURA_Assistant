@@ -132,7 +132,7 @@ GEMINI_MODEL=gemini-3.5-flash-lite
 
 # Tùy chọn 0đ (không cần thẻ Visa):
 GROQ_API_KEY=
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 GROQ_VISION_MODEL=qwen/qwen3.8-27b
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openrouter/free
