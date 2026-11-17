@@ -75,9 +75,11 @@
         <span class="tele-label">LLM Brain:</span>
         <span class="tele-val good" id="valLlm">Auto / Gemini (0 lượt nhớ)</span>
       </div>
-      <div class="llm-mode-row" id="llmModeSwitch" title="Chuyển chế độ bộ não AI: Auto (Gemini + Claude tự phối hợp) / Gemini / Claude">
+      <div class="llm-mode-row" id="llmModeSwitch" title="Chuyển chế độ bộ não AI: Auto (tự phân luồng & cứu nhau khi lỗi) / Gemini / Groq (miễn phí) / OpenRouter (miễn phí) / Claude">
         <button class="llm-pill active" data-llm-mode="auto" title="Tự chọn AI phù hợp & tự cứu khi lỗi">⚡ Auto</button>
-        <button class="llm-pill" data-llm-mode="gemini" title="Ưu tiên Gemini (có dự phòng Claude)">✨ Gemini</button>
+        <button class="llm-pill" data-llm-mode="gemini" title="Ưu tiên Gemini (tự dự phòng bên khác)">✨ Gemini</button>
+        <button class="llm-pill" data-llm-mode="groq" title="Ưu tiên Groq Llama 70B (miễn phí tại console.groq.com)">🚀 Groq</button>
+        <button class="llm-pill" data-llm-mode="openrouter" title="Ưu tiên OpenRouter Free (miễn phí tại openrouter.ai)">🌐 OR</button>
         <button class="llm-pill" data-llm-mode="claude" title="Ưu tiên Claude (cần ANTHROPIC_API_KEY trong .env)">🧠 Claude</button>
       </div>
       <div class="tele-row">
@@ -388,21 +390,28 @@
       const prov = (statusObj.activeProvider || statusObj.provider || 'gemini').toUpperCase();
       const turns = statusObj.historyTurns ?? 0;
       const maxTurns = statusObj.maxTurns ?? 15;
-      const dualTag = statusObj.dualBrainReady ? 'Dual' : '1-Key';
+      const count = statusObj.configuredCount || (statusObj.dualBrainReady ? 2 : 1);
+      const multiTag = count >= 2 ? `${count}-AI` : '1-Key';
       valLlm.textContent = mode === 'auto'
-        ? `AUTO[${dualTag}]→${prov} (${turns}/${maxTurns})`
+        ? `AUTO[${multiTag}]→${prov} (${turns}/${maxTurns})`
         : `${prov} (${turns}/${maxTurns} nhớ)`;
       valLlm.className = 'tele-val good';
+
+      const pillMeta = {
+        gemini: { key: 'geminiConfigured', hint: 'Chưa có GEMINI_API_KEY trong .env', ok: 'Ưu tiên Gemini' },
+        groq: { key: 'groqConfigured', hint: 'Chưa có GROQ_API_KEY (miễn phí tại console.groq.com)', ok: 'Ưu tiên Groq Free (siêu nhanh)' },
+        openrouter: { key: 'openrouterConfigured', hint: 'Chưa có OPENROUTER_API_KEY (miễn phí tại openrouter.ai)', ok: 'Ưu tiên OpenRouter Free' },
+        claude: { key: 'claudeConfigured', hint: 'Chưa có ANTHROPIC_API_KEY trong .env', ok: 'Ưu tiên Claude' }
+      };
 
       document.querySelectorAll('[data-llm-mode]').forEach((btn) => {
         const bMode = btn.getAttribute('data-llm-mode');
         btn.classList.toggle('active', bMode === mode);
-        if (bMode === 'claude' && statusObj.claudeConfigured === false) {
-          btn.classList.add('unconfigured');
-          btn.title = 'Chưa có ANTHROPIC_API_KEY trong .env (vào .env điền key Claude để dùng)';
-        } else if (bMode === 'claude') {
-          btn.classList.remove('unconfigured');
-          btn.title = 'Ưu tiên Claude (có dự phòng Gemini)';
+        const meta = pillMeta[bMode];
+        if (meta) {
+          const ready = statusObj[meta.key] !== false;
+          btn.classList.toggle('unconfigured', !ready);
+          btn.title = ready ? meta.ok : meta.hint;
         }
       });
     }
@@ -832,8 +841,8 @@
           const desc =
             targetMode === 'auto'
               ? (res.dualBrainReady
-                  ? '⚡ Đã bật chế độ Auto (Dual-Brain): tự phân luồng giữa Gemini & Claude và tự cứu nhau khi lỗi.'
-                  : '⚡ Đã bật chế độ Auto (hiện chạy Gemini; sẽ tự ghép đôi Claude ngay khi anh điền ANTHROPIC_API_KEY vào .env).')
+                  ? `⚡ Đã bật chế độ Auto (${res.configuredCount} AI sẵn sàng): tự phân luồng & tự cứu nhau khi lỗi.`
+                  : '⚡ Đã bật chế độ Auto (hiện có 1 key; sẽ tự ghép thêm AI ngay khi anh dán GROQ_API_KEY miễn phí hoặc OPENROUTER_API_KEY vào .env).')
               : `🧠 Đã chuyển bộ não chính sang ${targetMode.toUpperCase()} (giữ nguyên trí nhớ hội thoại).`;
           addChat('sys', desc);
           logButtonClick(`🧠 Đổi AI -> ${targetMode}`, `Mode=${res.routingMode} | Active=${res.activeProvider}`);

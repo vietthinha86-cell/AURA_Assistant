@@ -122,19 +122,32 @@ File `preferences.json` lưu trữ các thiết lập thói quen của bạn:
 
 ---
 
-## 5. Cấu Hình Bộ Não AI Kép — Dual-Brain (`.env`)
+## 5. Cấu Hình Bộ Não AI Đa Tầng — Multi-Brain (`.env`)
 
-Mở file **`.env`** tại thư mục gốc để tuỳ chỉnh API Key và chế độ chạy 2 AI song song (`Auto` phân luồng thông minh + tự cứu nhau khi lỗi/hết quota):
+Mở file **`.env`** tại thư mục gốc để cấu hình 1 hoặc nhiều API Key chạy song song miễn phí (`Auto` phân luồng thông minh + tự cứu nhau khi lỗi/hết quota):
 ```ini
 DEFAULT_PROVIDER=auto
 GEMINI_API_KEY=AIzaSy...
 GEMINI_MODEL=gemini-3.5-flash-lite
+
+# Tùy chọn 0đ (không cần thẻ Visa):
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_VISION_MODEL=qwen/qwen3.8-27b
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=openrouter/free
+
+# Tùy chọn nâng cao (trả phí):
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-3-5-sonnet-latest
 ```
-- **Chế độ `⚡ Auto` (Mặc định):** Khi có cả 2 key, tác vụ nhanh/hàng ngày (mở app, tìm file, YouTube, trò chuyện nhanh) tự chạy bằng **Gemini**, còn tác vụ phức tạp (sửa code, debug, phân tích lỗi sâu, Computer-Use Vision) tự ưu tiên **Claude**. Bất kỳ bên nào gặp lỗi (`429` hết quota / mạng / `5xx`) sẽ tự động chuyển nóng sang bên còn lại ngay trong cùng lượt gọi.
-- **Chuyển nhanh trên UI:** Trên bảng thông số góc trái của Aura có sẵn 3 nút **`⚡ Auto` / `✨ Gemini` / `🧠 Claude`** để đổi bộ não bất kỳ lúc nào mà vẫn giữ nguyên trí nhớ hội thoại.
-- *(Nếu chưa có `ANTHROPIC_API_KEY`, Aura tự chạy ổn định bằng Gemini và giữ Claude ở chế độ chờ mà không gây gián đoạn).*
+- **Chế độ `⚡ Auto` (Mặc định):**
+  - Tác vụ nhanh/gọi tool hàng ngày (mở app, tìm file, YouTube) $\rightarrow$ ưu tiên **Gemini**, tự dự phòng sang **Groq** / **OpenRouter** / **Claude**.
+  - Tác vụ suy luận sâu / sửa code / debug / câu dài $\rightarrow$ ưu tiên **Claude** (nếu có) hoặc **Groq (`llama-3.3-70b-versatile`)**, tự dự phòng sang **Gemini** / **OpenRouter**.
+  - **Computer-Use Vision:** ưu tiên **Claude** (nếu có) $\rightarrow$ **Gemini** $\rightarrow$ **Groq Vision** $\rightarrow$ **OpenRouter**.
+  - Bất kỳ AI nào lỗi (`429` hết quota / mạng / `5xx`) $\rightarrow$ tự chuyển nóng sang AI tiếp theo trong cùng lượt gọi.
+- **Chuyển nhanh trên UI:** Trên bảng thông số góc trái có 5 nút **`⚡ Auto` / `✨ Gemini` / `🚀 Groq` / `🌐 OR` / `🧠 Claude`** để đổi bộ não tức thì mà không mất trí nhớ hội thoại.
+- **Cách lấy key miễn phí 0đ (không cần thẻ):** Vào `console.groq.com` (lấy `GROQ_API_KEY`) hoặc `openrouter.ai` (lấy `OPENROUTER_API_KEY`) rồi dán vào `.env`.
 
 ---
 

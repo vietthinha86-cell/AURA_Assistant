@@ -18,7 +18,8 @@ const {
   NEUTRAL_TOOLS,
   evaluateActionRisk,
   convertToolsForGemini,
-  convertToolsForClaude
+  convertToolsForClaude,
+  convertToolsForOpenAI
 } = require('./tool_definitions');
 const { AuraToolExecutor } = require('./tool_executor');
 
@@ -178,8 +179,8 @@ function redactSecrets(text, secrets = []) {
   }
   // Che key truyền trên query ?key=...
   out = out.replace(/([?&]key=)[^&\s"']+/gi, '$1[REDACTED_KEY]');
-  // Che chuỗi dạng sk-ant-... hoặc AIza... hoặc AQ.Ab...
-  out = out.replace(/\b(sk-ant-[a-zA-Z0-9\-_]{6,}|AIza[a-zA-Z0-9\-_]{10,}|AQ\.[a-zA-Z0-9\-_.]{10,})\b/g, '[REDACTED_KEY]');
+  // Che chuỗi dạng sk-ant-... hoặc gsk_... hoặc sk-or-... hoặc AIza... hoặc AQ.Ab...
+  out = out.replace(/\b(sk-ant-[a-zA-Z0-9\-_]{6,}|gsk_[a-zA-Z0-9\-_]{8,}|sk-or-v1-[a-zA-Z0-9\-_]{8,}|AIza[a-zA-Z0-9\-_]{10,}|AQ\.[a-zA-Z0-9\-_.]{10,})\b/g, '[REDACTED_KEY]');
   return out;
 }
 
@@ -1199,6 +1200,212 @@ class ClaudeProvider extends LLMProvider {
 }
 
 // ============================================================================
+// 3B. OPENAI-COMPATIBLE PROVIDER (Dùng chung cho Groq Free Tier, OpenRouter...)
+// ============================================================================
+class OpenAICompatibleProvider extends LLMProvider {
+  /**
+   * Khởi tạo provider theo chuẩn OpenAI Chat Completions (Groq, OpenRouter...)
+   */
+  constructor(config = {}) {
+    super({
+      name: config.name || 'groq',
+      model: config.model || 'llama-3.3-70b-versatile',
+      apiKey: config.apiKey || ''
+    });
+    this.label = config.label || this.name.toUpperCase();
+    this.hostname = config.hostname || 'api.groq.com';
+    this.apiPath = config.apiPath || '/openai/v1/chat/completions';
+    this.visionModel = config.visionModel || this.model;
+    this.extraHeaders = config.extraHeaders || {};
+  }
+
+  _buildOpenAIMessages(messages = [], systemPrompt = '') {
+    const out = [];
+    if (systemPrompt) {
+      out.push({ role: 'system', content: systemPrompt });
+    }
+    for (const m of messages) {
+      if (!m || !m.content || m.role === 'system') continue;
+      const role = m.role === 'assistant' || m.role === 'model' ? 'assistant' : 'user';
+      out.push({ role, content: String(m.content) });
+    }
+    return out;
+  }
+
+  async _sendCompletion(bodyObj, openAiMessages, langHint, timeoutMs, isVision = false) {
+    const t0 = Date.now();
+    try {
+      let res = await httpsPostJson({
+        hostname: this.hostname,
+        path: this.apiPath,
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          ...this.extraHeaders
+        },
+        bodyObj,
+        timeoutMs
+      });
+
+      // Fallback nếu một số model free không hỗ trợ tools
+      if (
+        res.statusCode === 400 &&
+        bodyObj.tools &&
+        res.rawBody &&
+        /\b(tool|function|tools)\b/i.test(res.rawBody)
+      ) {
+        const noToolsBody = { ...bodyObj };
+        delete noToolsBody.tools;
+        delete noToolsBody.tool_choice;
+        res = await httpsPostJson({
+          hostname: this.hostname,
+          path: this.apiPath,
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            ...this.extraHeaders
+          },
+          bodyObj: noToolsBody,
+          timeoutMs
+        });
+      }
+
+      const latencyMs = Date.now() - t0;
+      if (res.statusCode < 200 || res.statusCode >= 300 || !res.json) {
+        const errMsg =
+          (res.json && res.json.error && res.json.error.message) ||
+          res.rawBody ||
+          `HTTP ${res.statusCode}`;
+        return {
+          ...classifyProviderError(this.label, res.statusCode, errMsg, langHint === 'en' ? 'en' : 'vi', [this.apiKey]),
+          model: bodyObj.model,
+          latencyMs
+        };
+      }
+
+      const choice = (res.json.choices && res.json.choices[0]) || {};
+      const msg = choice.message || {};
+      const rawText = typeof msg.content === 'string' ? msg.content : '';
+      const toolCalls = [];
+
+      if (Array.isArray(msg.tool_calls)) {
+        for (const tc of msg.tool_calls) {
+          if (!tc || !tc.function) continue;
+          let parsedArgs = {};
+          try {
+            parsedArgs = typeof tc.function.arguments === 'string'
+              ? JSON.parse(tc.function.arguments || '{}')
+              : (tc.function.arguments || {});
+          } catch (_) {}
+          toolCalls.push({
+            id: tc.id || `call_${Date.now()}`,
+            name: tc.function.name,
+            args: parsedArgs
+          });
+        }
+      }
+
+      const usage = res.json.usage || {};
+      const inputTokens = usage.prompt_tokens || 0;
+      const outputTokens = usage.completion_tokens || 0;
+      const parsed = parseStructuredAuraReply(rawText, langHint === 'en' ? 'en' : 'vi');
+
+      return {
+        ok: true,
+        provider: this.name,
+        model: res.json.model || bodyObj.model,
+        text: parsed.text,
+        rawText: isVision ? rawText : undefined,
+        emotion: parsed.emotion,
+        avatarEmotion: parsed.avatarEmotion,
+        lang: parsed.lang,
+        toolCalls,
+        rawMessages: openAiMessages,
+        rawAssistantMessage: msg,
+        tokens: {
+          input: inputTokens,
+          output: outputTokens,
+          total: usage.total_tokens || inputTokens + outputTokens
+        },
+        latencyMs
+      };
+    } catch (err) {
+      return {
+        ...classifyProviderError(this.label, 0, err.message || String(err), langHint === 'en' ? 'en' : 'vi', [this.apiKey]),
+        model: bodyObj.model,
+        latencyMs: Date.now() - t0
+      };
+    }
+  }
+
+  async chat(messages, tools = [], options = {}) {
+    const langHint = options.langHint || 'auto';
+    const systemPrompt = options.systemPrompt || buildAuraSystemPrompt(langHint);
+    const openAiMessages = this._buildOpenAIMessages(messages, systemPrompt);
+    const bodyObj = {
+      model: this.model,
+      messages: openAiMessages,
+      temperature: 0.65,
+      max_tokens: 512
+    };
+    if (Array.isArray(tools) && tools.length > 0) {
+      bodyObj.tools = tools;
+      bodyObj.tool_choice = 'auto';
+    }
+    return this._sendCompletion(bodyObj, openAiMessages, langHint, options.timeoutMs || 18000, false);
+  }
+
+  async continueToolTurn(historyMessages, rawAssistantMessage, toolCallId, toolName, toolResult, options = {}) {
+    const langHint = options.langHint || 'auto';
+    const nextMessages = [
+      ...(historyMessages || []),
+      rawAssistantMessage || { role: 'assistant', content: '' },
+      {
+        role: 'tool',
+        tool_call_id: toolCallId,
+        name: toolName,
+        content: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult)
+      }
+    ];
+    const bodyObj = {
+      model: this.model,
+      messages: nextMessages,
+      temperature: 0.55,
+      max_tokens: 400
+    };
+    if (Array.isArray(options.tools) && options.tools.length > 0) {
+      bodyObj.tools = options.tools;
+      bodyObj.tool_choice = 'auto';
+    }
+    return this._sendCompletion(bodyObj, nextMessages, langHint, options.timeoutMs || 18000, false);
+  }
+
+  async vision(image, prompt, options = {}) {
+    const langHint = options.langHint || detectTextLanguage(prompt, 'vi');
+    const systemPrompt = options.systemPrompt || buildAuraSystemPrompt(langHint);
+    let dataUrl = String(image || '');
+    if (!dataUrl.startsWith('data:')) {
+      dataUrl = `data:image/png;base64,${dataUrl}`;
+    }
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: String(prompt || 'Describe this screen briefly.') },
+          { type: 'image_url', image_url: { url: dataUrl } }
+        ]
+      }
+    ];
+    const bodyObj = {
+      model: this.visionModel || this.model,
+      messages,
+      temperature: 0.4,
+      max_tokens: 320
+    };
+    return this._sendCompletion(bodyObj, messages, langHint, options.timeoutMs || 25000, true);
+  }
+}
+
+// ============================================================================
 // 4. BỘ ĐIỀU PHỐI LLM & BỘ NHỚ HỘI THOẠI NGẮN HẠN & CÔNG CỤ (AuraLLMRouter)
 // ============================================================================
 class AuraLLMRouter {
@@ -1209,7 +1416,10 @@ class AuraLLMRouter {
     this.history = [];
     this.envConfig = {};
     this.geminiProvider = null;
+    this.groqProvider = null;
+    this.openrouterProvider = null;
     this.claudeProvider = null;
+    this.providers = {};
     this.activeProviderName = 'gemini';
     this.routingMode = 'auto';
     this.startupNotice = '';
@@ -1319,6 +1529,14 @@ class AuraLLMRouter {
     });
   }
 
+  _normalizeProviderName(rawName) {
+    const k = String(rawName || 'auto').toLowerCase().trim();
+    if (k === 'anthropic') return 'claude';
+    if (k === 'or') return 'openrouter';
+    if (['gemini', 'groq', 'openrouter', 'claude'].includes(k)) return k;
+    return 'auto';
+  }
+
   /**
    * Đọc file .env từ đĩa (bảo mật: không bao giờ đưa key ra kết quả trả về)
    */
@@ -1339,92 +1557,100 @@ class AuraLLMRouter {
       }
     }
 
-    const rawDefault = String(parsed.DEFAULT_PROVIDER || 'auto').toLowerCase().trim();
-    const defaultProvider = rawDefault === 'anthropic' ? 'claude' : (rawDefault === 'claude' || rawDefault === 'gemini' ? rawDefault : 'auto');
-    const geminiKey = String(parsed.GEMINI_API_KEY || '').trim();
-    const anthropicKey = String(parsed.ANTHROPIC_API_KEY || '').trim();
-    const geminiModel = String(parsed.GEMINI_MODEL || 'gemini-3.5-flash-lite').trim();
-    const anthropicModel = String(parsed.ANTHROPIC_MODEL || parsed.CLAUDE_MODEL || 'claude-3-5-sonnet-latest').trim();
+    const defaultProvider = this._normalizeProviderName(parsed.DEFAULT_PROVIDER || 'auto');
     const maxTurns = Number(parsed.MAX_CONVERSATION_HISTORY) || 15;
     this.maxTurns = Math.min(20, Math.max(10, maxTurns));
 
     this.geminiProvider = new GeminiProvider({
-      apiKey: geminiKey,
-      model: geminiModel
+      apiKey: String(parsed.GEMINI_API_KEY || '').trim(),
+      model: String(parsed.GEMINI_MODEL || 'gemini-3.5-flash-lite').trim()
     });
-
+    this.groqProvider = new OpenAICompatibleProvider({
+      name: 'groq',
+      label: 'Groq',
+      hostname: 'api.groq.com',
+      apiPath: '/openai/v1/chat/completions',
+      apiKey: String(parsed.GROQ_API_KEY || '').trim(),
+      model: String(parsed.GROQ_MODEL || 'llama-3.3-70b-versatile').trim(),
+      visionModel: String(parsed.GROQ_VISION_MODEL || 'qwen/qwen3.8-27b').trim()
+    });
+    this.openrouterProvider = new OpenAICompatibleProvider({
+      name: 'openrouter',
+      label: 'OpenRouter',
+      hostname: 'openrouter.ai',
+      apiPath: '/api/v1/chat/completions',
+      apiKey: String(parsed.OPENROUTER_API_KEY || '').trim(),
+      model: String(parsed.OPENROUTER_MODEL || 'openrouter/free').trim(),
+      visionModel: String(parsed.OPENROUTER_VISION_MODEL || parsed.OPENROUTER_MODEL || 'openrouter/free').trim(),
+      extraHeaders: {
+        'HTTP-Referer': 'https://github.com/vietthinha86-cell/AURA_Assistant',
+        'X-Title': 'AURA Desktop Assistant'
+      }
+    });
     this.claudeProvider = new ClaudeProvider({
-      apiKey: anthropicKey,
-      model: anthropicModel
+      apiKey: String(parsed.ANTHROPIC_API_KEY || '').trim(),
+      model: String(parsed.ANTHROPIC_MODEL || parsed.CLAUDE_MODEL || 'claude-3-5-sonnet-latest').trim()
     });
 
-    const hasGemini = this.geminiProvider.isConfigured();
-    const hasClaude = this.claudeProvider.isConfigured();
+    this.providers = {
+      gemini: this.geminiProvider,
+      groq: this.groqProvider,
+      openrouter: this.openrouterProvider,
+      claude: this.claudeProvider
+    };
+
+    const configuredNames = Object.keys(this.providers).filter((k) => this.providers[k].isConfigured());
     this.routingMode = defaultProvider;
 
-    const notices = [];
-    if (defaultProvider === 'auto') {
-      if (hasGemini && hasClaude) {
-        this.activeProviderName = 'gemini';
-        notices.push(`Đã kích hoạt Dual-Brain (Auto): Gemini (${geminiModel}) cho tác vụ nhanh & Claude (${anthropicModel}) cho tác vụ phức tạp + tự cứu khi lỗi.`);
-      } else if (hasGemini) {
-        this.activeProviderName = 'gemini';
-        notices.push(`Đang dùng GeminiProvider (${geminiModel}). Chưa có ANTHROPIC_API_KEY trong .env nên ClaudeProvider ở chế độ chờ (chế độ Auto sẽ tự bật Dual-Brain ngay khi điền key Claude).`);
-      } else if (hasClaude) {
-        this.activeProviderName = 'claude';
-        notices.push(`Thiếu GEMINI_API_KEY trong .env -> đang chạy bằng ClaudeProvider (${anthropicModel}).`);
+    if (configuredNames.length === 0) {
+      this.activeProviderName = defaultProvider === 'auto' ? 'gemini' : defaultProvider;
+      this.startupNotice = 'Chưa có API Key nào trong file .env (GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY hoặc ANTHROPIC_API_KEY).';
+    } else if (defaultProvider === 'auto') {
+      this.activeProviderName = configuredNames.includes('gemini') ? 'gemini' : configuredNames[0];
+      if (configuredNames.length >= 2) {
+        const listText = configuredNames.map((n) => `${n.toUpperCase()} (${this.providers[n].model})`).join(' + ');
+        this.startupNotice = `Đã kích hoạt Multi-Brain (Auto): ${listText} tự phân luồng & cứu nhau khi lỗi.`;
       } else {
-        this.activeProviderName = 'gemini';
-        notices.push('Chưa có API Key nào trong file .env. Vui lòng điền GEMINI_API_KEY hoặc ANTHROPIC_API_KEY.');
+        const only = configuredNames[0];
+        this.startupNotice = `Đang chạy ${only.toUpperCase()} (${this.providers[only].model}). Thêm GROQ_API_KEY (miễn phí tại console.groq.com) hoặc OPENROUTER_API_KEY vào .env để chạy 2 AI song song 0đ.`;
       }
-    } else if (defaultProvider === 'claude') {
-      if (hasClaude) {
-        this.activeProviderName = 'claude';
-        if (!hasGemini) {
-          notices.push('Thiếu GEMINI_API_KEY trong .env -> đang chạy bằng ClaudeProvider.');
-        }
-      } else if (hasGemini) {
-        this.activeProviderName = 'gemini';
-        notices.push('DEFAULT_PROVIDER=claude nhưng thiếu ANTHROPIC_API_KEY -> tự động chuyển sang chạy bằng GeminiProvider (' + geminiModel + ').');
-      } else {
-        this.activeProviderName = 'claude';
-        notices.push('Chưa cấu hình GEMINI_API_KEY và ANTHROPIC_API_KEY trong file .env.');
-      }
+    } else if (this.providers[defaultProvider] && this.providers[defaultProvider].isConfigured()) {
+      this.activeProviderName = defaultProvider;
+      this.startupNotice = configuredNames.length >= 2
+        ? `Ưu tiên ${defaultProvider.toUpperCase()} (${this.providers[defaultProvider].model}), sẵn sàng dự phòng với ${configuredNames.filter((n) => n !== defaultProvider).join(', ').toUpperCase()}.`
+        : '';
     } else {
-      if (hasGemini) {
-        this.activeProviderName = 'gemini';
-        if (!hasClaude) {
-          notices.push(`Đang dùng GeminiProvider (${geminiModel}). Chưa có ANTHROPIC_API_KEY trong .env nên ClaudeProvider ở chế độ chờ.`);
-        }
-      } else if (hasClaude) {
-        this.activeProviderName = 'claude';
-        notices.push(`Thiếu GEMINI_API_KEY trong .env -> tự động chuyển sang chạy bằng ClaudeProvider (${anthropicModel}).`);
-      } else {
-        this.activeProviderName = 'gemini';
-        notices.push('Chưa có API Key nào trong file .env. Vui lòng điền GEMINI_API_KEY hoặc ANTHROPIC_API_KEY.');
-      }
+      this.activeProviderName = configuredNames[0];
+      this.startupNotice = `DEFAULT_PROVIDER=${defaultProvider} nhưng chưa có key -> tự chuyển sang ${this.activeProviderName.toUpperCase()} (${this.providers[this.activeProviderName].model}).`;
     }
 
-    this.startupNotice = notices.join(' ');
     this.writeLog(
       'LLM_INIT',
-      `Mode=${this.routingMode} | Active=${this.activeProviderName} | GeminiConfigured=${hasGemini}(model=${geminiModel}) | ClaudeConfigured=${hasClaude}(model=${anthropicModel}) | MaxTurns=${this.maxTurns} | Notice="${this.startupNotice}"`
+      `Mode=${this.routingMode} | Active=${this.activeProviderName} | Configured=[${configuredNames.join(',')}] | MaxTurns=${this.maxTurns} | Notice="${this.startupNotice}"`
     );
 
     return this.getPublicStatus();
   }
 
   getPublicStatus() {
-    const geminiConfigured = this.geminiProvider ? this.geminiProvider.isConfigured() : false;
-    const claudeConfigured = this.claudeProvider ? this.claudeProvider.isConfigured() : false;
+    const geminiConfigured = Boolean(this.geminiProvider?.isConfigured());
+    const groqConfigured = Boolean(this.groqProvider?.isConfigured());
+    const openrouterConfigured = Boolean(this.openrouterProvider?.isConfigured());
+    const claudeConfigured = Boolean(this.claudeProvider?.isConfigured());
+    const configuredCount = [geminiConfigured, groqConfigured, openrouterConfigured, claudeConfigured].filter(Boolean).length;
     return {
       routingMode: this.routingMode,
       activeProvider: this.activeProviderName,
-      dualBrainReady: Boolean(geminiConfigured && claudeConfigured),
+      dualBrainReady: configuredCount >= 2,
+      configuredCount,
       geminiConfigured,
-      geminiModel: this.geminiProvider ? this.geminiProvider.model : 'gemini-3.5-flash-lite',
+      geminiModel: this.geminiProvider?.model || 'gemini-3.5-flash-lite',
+      groqConfigured,
+      groqModel: this.groqProvider?.model || 'llama-3.3-70b-versatile',
+      openrouterConfigured,
+      openrouterModel: this.openrouterProvider?.model || 'openrouter/free',
       claudeConfigured,
-      claudeModel: this.claudeProvider ? this.claudeProvider.model : 'claude-3-5-sonnet-latest',
+      claudeModel: this.claudeProvider?.model || 'claude-3-5-sonnet-latest',
       historyTurns: Math.floor(this.history.length / 2),
       historyMessagesCount: this.history.length,
       maxTurns: this.maxTurns,
@@ -1434,29 +1660,28 @@ class AuraLLMRouter {
   }
 
   setRoutingMode(mode) {
-    const raw = String(mode || 'auto').toLowerCase().trim();
-    const normalized = raw === 'anthropic' ? 'claude' : (raw === 'claude' || raw === 'gemini' ? raw : 'auto');
+    const normalized = this._normalizeProviderName(mode);
+    const keyHintMap = {
+      gemini: 'GEMINI_API_KEY',
+      groq: 'GROQ_API_KEY (miễn phí tại console.groq.com)',
+      openrouter: 'OPENROUTER_API_KEY (miễn phí tại openrouter.ai)',
+      claude: 'ANTHROPIC_API_KEY'
+    };
 
-    if (normalized === 'claude' && !this.claudeProvider.isConfigured()) {
+    if (normalized !== 'auto' && !this.providers[normalized]?.isConfigured()) {
       return {
         ok: false,
-        error: 'Chưa có ANTHROPIC_API_KEY trong file .env để chuyển sang Claude.',
-        ...this.getPublicStatus()
-      };
-    }
-    if (normalized === 'gemini' && !this.geminiProvider.isConfigured()) {
-      return {
-        ok: false,
-        error: 'Chưa có GEMINI_API_KEY trong file .env để chuyển sang Gemini.',
+        error: `Chưa có ${keyHintMap[normalized]} trong file .env để chuyển sang ${normalized.toUpperCase()}.`,
         ...this.getPublicStatus()
       };
     }
 
     this.routingMode = normalized;
-    if (normalized === 'gemini' || normalized === 'claude') {
+    if (normalized !== 'auto') {
       this.activeProviderName = normalized;
     } else {
-      this.activeProviderName = this.geminiProvider.isConfigured() ? 'gemini' : 'claude';
+      const configured = Object.keys(this.providers).filter((k) => this.providers[k].isConfigured());
+      this.activeProviderName = configured.includes('gemini') ? 'gemini' : (configured[0] || 'gemini');
     }
     this.writeLog('LLM_MODE', `Switched RoutingMode=${this.routingMode} | ActiveProvider=${this.activeProviderName}`);
     return {
@@ -1476,103 +1701,112 @@ class AuraLLMRouter {
   }
 
   /**
-   * Phân loại độ phức tạp tác vụ để điều phối giữa Gemini (nhanh/tiết kiệm) và Claude (suy luận sâu/sửa code/Vision)
+   * Phân loại tác vụ để phân luồng giữa các AI đang có key:
+   * - Vision: ưu tiên Claude (nếu có) -> Gemini -> Groq -> OpenRouter
+   * - Suy luận sâu / sửa code / debug / câu dài: ưu tiên Claude (nếu có) -> Groq 70B -> Gemini -> OpenRouter
+   * - Nhanh / gọi tool hàng ngày: ưu tiên Gemini -> Groq -> OpenRouter -> Claude
    */
   _classifyTaskRouting(taskText = '', isVision = false) {
     if (isVision) {
-      return { preferred: 'claude', reason: 'vision_deep_reasoning' };
+      return { order: ['claude', 'gemini', 'groq', 'openrouter'], reason: 'vision_deep_reasoning' };
     }
     const text = String(taskText || '').trim();
     const COMPLEX_TASK_REGEX =
       /\b(sửa\s*code|sua\s*code|test\s*và\s*sửa|test\s*va\s*sua|debug|refactor|lập\s*trình|lap\s*trinh|viết\s*code|viet\s*code|kiến\s*trúc|kien\s*truc|phân\s*tích\s*lỗi|phan\s*tich\s*loi|lỗi\s*này|stack\s*trace|review\s*code|giải\s*thích\s*chi\s*tiết)\b/i;
     if (COMPLEX_TASK_REGEX.test(text) || text.length >= 260) {
-      return { preferred: 'claude', reason: 'complex_reasoning' };
+      return { order: ['claude', 'groq', 'gemini', 'openrouter'], reason: 'complex_reasoning' };
     }
-    return { preferred: 'gemini', reason: 'fast_everyday' };
+    return { order: ['gemini', 'groq', 'openrouter', 'claude'], reason: 'fast_everyday' };
   }
 
   /**
-   * Xây dựng chuỗi provider ứng viên có sẵn key theo thứ tự ưu tiên + dự phòng nóng
+   * Xây dựng chuỗi provider ứng viên có sẵn key theo thứ tự ưu tiên + dự phòng nóng nhiều tầng
    */
   _buildCandidateChain(requestedProvider = null, taskText = '', isVision = false) {
-    const reqRaw = String(requestedProvider || this.routingMode || 'auto').toLowerCase().trim();
-    const mode = reqRaw === 'anthropic' ? 'claude' : (reqRaw === 'claude' || reqRaw === 'gemini' ? reqRaw : 'auto');
+    const mode = this._normalizeProviderName(requestedProvider || this.routingMode || 'auto');
+    const configuredOrder = (preferredList) =>
+      preferredList.filter((name) => this.providers[name]?.isConfigured());
 
-    const hasGemini = this.geminiProvider.isConfigured();
-    const hasClaude = this.claudeProvider.isConfigured();
+    const buildEntry = (name, reason, fallbackNote = null) => ({
+      provider: this.providers[name],
+      reason,
+      fallbackNote
+    });
 
-    if (!hasGemini && !hasClaude) {
-      return [{ provider: mode === 'claude' ? this.claudeProvider : this.geminiProvider, reason: 'unconfigured', fallbackNote: null }];
+    if (mode !== 'auto') {
+      const backups = ['gemini', 'groq', 'openrouter', 'claude'].filter((n) => n !== mode);
+      const valid = configuredOrder([mode, ...backups]);
+      if (valid.length === 0) {
+        return [buildEntry(mode, 'unconfigured')];
+      }
+      if (valid[0] === mode) {
+        return valid.map((n, idx) => buildEntry(n, idx === 0 ? `pinned_${mode}` : `failover_${n}`));
+      }
+      return valid.map((n, idx) =>
+        buildEntry(
+          n,
+          idx === 0 ? `missing_${mode}_key` : `failover_${n}`,
+          idx === 0 ? `Thiếu key cho ${mode.toUpperCase()} -> tự động dùng ${n.toUpperCase()}.` : null
+        )
+      );
     }
 
-    const buildEntry = (prov, reason, fallbackNote = null) => ({ provider: prov, reason, fallbackNote });
-
-    if (mode === 'claude') {
-      if (hasClaude && hasGemini) return [buildEntry(this.claudeProvider, 'pinned_claude'), buildEntry(this.geminiProvider, 'failover_gemini')];
-      if (hasClaude) return [buildEntry(this.claudeProvider, 'pinned_claude')];
-      return [buildEntry(this.geminiProvider, 'missing_claude_key', 'Thiếu ANTHROPIC_API_KEY trong .env -> tự động dùng GeminiProvider.')];
-    }
-
-    if (mode === 'gemini') {
-      if (hasGemini && hasClaude) return [buildEntry(this.geminiProvider, 'pinned_gemini'), buildEntry(this.claudeProvider, 'failover_claude')];
-      if (hasGemini) return [buildEntry(this.geminiProvider, 'pinned_gemini')];
-      return [buildEntry(this.claudeProvider, 'missing_gemini_key', 'Thiếu GEMINI_API_KEY trong .env -> tự động dùng ClaudeProvider.')];
-    }
-
-    // Chế độ Auto: Smart Routing khi có cả 2 key, hoặc tự chọn bên có key
     const routing = this._classifyTaskRouting(taskText, isVision);
-    if (hasGemini && hasClaude) {
-      return routing.preferred === 'claude'
-        ? [buildEntry(this.claudeProvider, `auto_${routing.reason}`), buildEntry(this.geminiProvider, 'failover_gemini')]
-        : [buildEntry(this.geminiProvider, `auto_${routing.reason}`), buildEntry(this.claudeProvider, 'failover_claude')];
+    const valid = configuredOrder(routing.order);
+    if (valid.length === 0) {
+      return [buildEntry('gemini', 'unconfigured')];
     }
-    if (hasGemini) {
-      return [buildEntry(this.geminiProvider, 'auto_single_gemini')];
-    }
-    return [buildEntry(this.claudeProvider, 'auto_single_claude', 'Thiếu GEMINI_API_KEY trong .env -> tự động dùng ClaudeProvider.')];
+    return valid.map((n, idx) => buildEntry(n, idx === 0 ? `auto_${routing.reason}` : `failover_${n}`));
   }
 
   /**
-   * Thực thi tác vụ AI kèm cơ chế tự cứu nóng (Hot Runtime Failover) dùng chung cho Chat và Vision
+   * Thực thi tác vụ AI kèm cơ chế tự cứu nóng qua toàn bộ chuỗi dự phòng (Hot Runtime Failover)
    */
   async _executeWithFailover({ candidates, allowFailover = true, invokeFn, logTag = 'LLM' }) {
-    const primary = candidates[0];
-    let res = await invokeFn(primary.provider);
-    let usedProvider = primary.provider;
-    let usedReason = primary.reason;
-    let fallbackNote = primary.fallbackNote || null;
-
-    if (res && res.ok) {
-      return { res, providerInstance: usedProvider, routeReason: usedReason, fallbackNote };
+    const first = candidates[0];
+    let lastRes = await invokeFn(first.provider);
+    if (lastRes && lastRes.ok) {
+      return {
+        res: lastRes,
+        providerInstance: first.provider,
+        routeReason: first.reason,
+        fallbackNote: first.fallbackNote || null
+      };
     }
 
-    if (allowFailover && candidates.length > 1 && candidates[1].provider.isConfigured()) {
-      const backup = candidates[1];
-      const errCode = res?.errorCode || 'ERROR';
-      this.writeLog(
-        `${logTag}_FAILOVER`,
-        `Primary=${usedProvider.name} failed (${errCode}) -> Switching to ${backup.provider.name}`
-      );
+    if (!allowFailover || candidates.length <= 1) {
+      return {
+        res: lastRes,
+        providerInstance: first.provider,
+        routeReason: first.reason,
+        fallbackNote: first.fallbackNote || null
+      };
+    }
+
+    const failTrail = [`${first.provider.name.toUpperCase()}(${lastRes?.errorCode || 'ERR'})`];
+    for (let i = 1; i < candidates.length; i++) {
+      const backup = candidates[i];
+      if (!backup.provider.isConfigured()) continue;
+      this.writeLog(`${logTag}_FAILOVER`, `${failTrail[failTrail.length - 1]} failed -> Switching to ${backup.provider.name}`);
       const backupRes = await invokeFn(backup.provider);
       if (backupRes && backupRes.ok) {
-        fallbackNote = `${usedProvider.name.toUpperCase()} gặp lỗi (${errCode}) -> đã tự chuyển nóng sang ${backup.provider.name.toUpperCase()}.`;
         return {
           res: backupRes,
           providerInstance: backup.provider,
           routeReason: backup.reason,
-          fallbackNote
+          fallbackNote: `${failTrail.join(' -> ')} gặp lỗi -> đã tự chuyển nóng sang ${backup.provider.name.toUpperCase()}.`
         };
       }
-      // Nếu cả 2 đều lỗi thì giữ nguyên lỗi chi tiết nhưng thông báo rõ
-      return {
-        res: backupRes || res,
-        providerInstance: backup.provider,
-        routeReason: backup.reason,
-        fallbackNote: `Cả ${usedProvider.name.toUpperCase()} (${errCode}) và ${backup.provider.name.toUpperCase()} (${backupRes?.errorCode || 'ERROR'}) đều gặp lỗi.`
-      };
+      failTrail.push(`${backup.provider.name.toUpperCase()}(${backupRes?.errorCode || 'ERR'})`);
+      lastRes = backupRes || lastRes;
     }
 
-    return { res, providerInstance: usedProvider, routeReason: usedReason, fallbackNote };
+    return {
+      res: lastRes,
+      providerInstance: candidates[candidates.length - 1].provider,
+      routeReason: candidates[candidates.length - 1].reason,
+      fallbackNote: `Các AI đã thử đều lỗi: ${failTrail.join(' -> ')}.`
+    };
   }
 
   _selectProvider(requestedProvider = null, taskText = '', isVision = false) {
@@ -1684,12 +1918,12 @@ class AuraLLMRouter {
       { role: 'user', content: cleanUserText }
     ];
 
-    const getToolsFor = (prov) =>
-      options.tools && options.tools.length
-        ? options.tools
-        : prov.name === 'claude'
-          ? convertToolsForClaude(NEUTRAL_TOOLS)
-          : convertToolsForGemini(NEUTRAL_TOOLS);
+    const getToolsFor = (prov) => {
+      if (options.tools && options.tools.length) return options.tools;
+      if (prov.name === 'claude') return convertToolsForClaude(NEUTRAL_TOOLS);
+      if (prov.name === 'gemini') return convertToolsForGemini(NEUTRAL_TOOLS);
+      return convertToolsForOpenAI(NEUTRAL_TOOLS);
+    };
 
     // TURN 1: Gửi yêu cầu người dùng tới LLM (hỗ trợ Dual-Brain Smart Routing & Failover nóng)
     const execTurn1 = await this._executeWithFailover({
@@ -1778,11 +2012,20 @@ class AuraLLMRouter {
           toolResult,
           { langHint: detectedInputLang, tools: toolsForProvider }
         );
-      } else {
+      } else if (providerInstance.name === 'gemini') {
         res = await providerInstance.continueToolTurn(
           res.rawContents || [],
           res.model,
           res.candidateContent,
+          toolName,
+          toolResult,
+          { langHint: detectedInputLang, tools: toolsForProvider }
+        );
+      } else {
+        res = await providerInstance.continueToolTurn(
+          res.rawMessages || [],
+          res.rawAssistantMessage,
+          call.id || `call_${Date.now()}`,
           toolName,
           toolResult,
           { langHint: detectedInputLang, tools: toolsForProvider }
@@ -1908,6 +2151,7 @@ module.exports = {
   LLMProvider,
   GeminiProvider,
   ClaudeProvider,
+  OpenAICompatibleProvider,
   AuraLLMRouter,
   parseStructuredAuraReply,
   sanitizeSpokenText,

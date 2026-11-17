@@ -896,11 +896,30 @@ function convertToolsForClaude(tools = NEUTRAL_TOOLS) {
   }));
 }
 
+/**
+ * Chuyển schema sang chuẩn OpenAI Chat Completions (dùng chung cho Groq, OpenRouter...)
+ */
+function convertToolsForOpenAI(tools = NEUTRAL_TOOLS) {
+  return tools.map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description || '',
+      parameters: {
+        type: 'object',
+        properties: t.parameters?.properties || {},
+        required: t.parameters?.required || []
+      }
+    }
+  }));
+}
+
 module.exports = {
   TRUSTED_DOMAINS,
   UNSUPPORTED_ACTIONS_NOTICE,
   NEUTRAL_TOOLS,
   evaluateActionRisk,
   convertToolsForGemini,
-  convertToolsForClaude
+  convertToolsForClaude,
+  convertToolsForOpenAI
 };
