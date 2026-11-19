@@ -979,4 +979,199 @@ input {
   font-weight: 800;
 }
 
+/* ==========================================================================
+   NÂNG CẤP TRẢI NGHIỆM: COMPACT UI, STOP-TTS, SCREEN Q&A / ẢNH, MARKDOWN
+   ========================================================================== */
+.speech-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stop-speak-btn {
+  display: none;
+  background: rgba(220, 38, 38, 0.85);
+  border: 1px solid rgba(252, 165, 165, 0.7);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+
+.stop-speak-btn.visible {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.stop-speak-btn:hover {
+  background: rgba(239, 68, 68, 1);
+  transform: scale(1.03);
+}
+
+.image-attach-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgba(14, 116, 144, 0.25);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  margin-bottom: 5px;
+}
+
+.image-attach-bar.hidden {
+  display: none;
+}
+
+.image-attach-thumb {
+  width: 44px;
+  height: 30px;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: #0f172a;
+}
+
+.image-attach-info {
+  flex: 1;
+  font-size: 11px;
+  color: #e0f2fe;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-attach-clear {
+  background: rgba(239, 68, 68, 0.28);
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  color: #fecaca;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.image-attach-clear:hover {
+  background: rgba(239, 68, 68, 0.6);
+  color: #fff;
+}
+
+.screen-ask-btn {
+  background: linear-gradient(135deg, #4f46e5, #0284c7);
+  border: 1px solid rgba(125, 211, 252, 0.55);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+
+.screen-ask-btn:hover {
+  filter: brightness(1.12);
+}
+
+.screen-ask-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.chat-panel.drop-active,
+.tts-panel.drop-active {
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.55);
+}
+
+.chat-attach-img {
+  display: block;
+  max-width: 180px;
+  max-height: 110px;
+  border-radius: 6px;
+  margin-top: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Markdown & Code Block trong khung Chat */
+.chat-text .md-inline-code {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 11px;
+  background: rgba(15, 23, 42, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #7dd3fc;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.chat-text .md-code-wrap {
+  margin: 5px 0;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(2, 6, 23, 0.88);
+}
+
+.chat-text .md-code-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 8px;
+  background: rgba(30, 41, 59, 0.9);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 10px;
+  color: #94a3b8;
+  font-family: 'Consolas', monospace;
+}
+
+.chat-text .md-copy-btn {
+  background: rgba(56, 189, 248, 0.18);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: #e0f2fe;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.chat-text .md-copy-btn:hover {
+  background: rgba(56, 189, 248, 0.4);
+}
+
+.chat-text .md-pre {
+  margin: 0;
+  padding: 6px 8px;
+  overflow-x: auto;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #e2e8f0;
+  white-space: pre;
+}
+
+/* Chế độ giao diện gọn (Compact Companion Mode) */
+body.compact-ui #telemetryBox,
+body.compact-ui #miniConsole,
+body.compact-ui .tts-quick-row,
+body.compact-ui #controlBar {
+  display: none !important;
+}
+
+body.compact-ui .chat-log {
+  max-height: 190px;
+}
+
+.win-btn.compact-active {
+  background: rgba(56, 189, 248, 0.35);
+  border-color: #38bdf8;
+  color: #fff;
+}
+
+
 

@@ -1436,6 +1436,8 @@ class AuraLLMRouter {
     this.writeLog = writeLogFn || (() => {});
     this.maxTurns = 15;
     this.history = [];
+    this.historyFilePath = path.join(this.projectRoot, 'logs', 'chat_history.json');
+    this.persistHistory = !process.argv.some((a) => String(a).startsWith('--autotest'));
     this.envConfig = {};
     this.geminiProvider = null;
     this.groqProvider = null;
@@ -1459,6 +1461,51 @@ class AuraLLMRouter {
     this.onReminderTrigger = null;
 
     this.reloadEnvConfig();
+    if (this.persistHistory) {
+      this._loadPersistedHistory();
+    }
+  }
+
+  _loadPersistedHistory() {
+    try {
+      if (!fs.existsSync(this.historyFilePath)) return;
+      const raw = fs.readFileSync(this.historyFilePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      const valid = parsed
+        .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+        .map((m) => ({
+          role: m.role,
+          content: m.content.trim(),
+          ts: typeof m.ts === 'number' ? m.ts : Date.now()
+        }));
+      const maxMessages = this.maxTurns * 2;
+      this.history = valid.length > maxMessages ? valid.slice(valid.length - maxMessages) : valid;
+      if (this.history.length > 0) {
+        this.writeLog('LLM_MEMORY', `Đã khôi phục ${Math.floor(this.history.length / 2)} lượt hội thoại từ logs/chat_history.json.`);
+      }
+    } catch (err) {
+      this.writeLog('LLM_MEMORY_WARN', `Không đọc được lịch sử hội thoại cũ: ${err.message}`);
+    }
+  }
+
+  _savePersistedHistory() {
+    if (!this.persistHistory) return;
+    try {
+      const dir = path.dirname(this.historyFilePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.historyFilePath, JSON.stringify(this.history, null, 2), 'utf8');
+    } catch (err) {
+      this.writeLog('LLM_MEMORY_WARN', `Không lưu được lịch sử hội thoại: ${err.message}`);
+    }
+  }
+
+  getHistory() {
+    return {
+      history: this.history.slice(),
+      turns: Math.floor(this.history.length / 2),
+      maxTurns: this.maxTurns
+    };
   }
 
   /**
@@ -1715,6 +1762,7 @@ class AuraLLMRouter {
   clearHistory() {
     const prevLen = this.history.length;
     this.history = [];
+    this._savePersistedHistory();
     this.writeLog('LLM_MEMORY', `Đã xoá ngữ cảnh hội thoại ngắn hạn (đã xoá ${prevLen} tin nhắn).`);
     return {
       clearedMessages: prevLen,
@@ -2113,12 +2161,14 @@ class AuraLLMRouter {
 
     if (res.ok && res.text) {
       if (!options.skipHistory) {
-        this.history.push({ role: 'user', content: cleanUserText });
-        this.history.push({ role: 'assistant', content: res.text });
+        const nowTs = Date.now();
+        this.history.push({ role: 'user', content: cleanUserText, ts: nowTs });
+        this.history.push({ role: 'assistant', content: res.text, ts: nowTs });
         const maxMessages = this.maxTurns * 2;
         if (this.history.length > maxMessages) {
           this.history = this.history.slice(this.history.length - maxMessages);
         }
+        this._savePersistedHistory();
       }
 
       const toolTraceSummary = toolExecutionTrace.map((t) => `${t.tool}(ok=${t.result?.success})`).join(' -> ');
@@ -2155,6 +2205,17 @@ class AuraLLMRouter {
     const res = exec.res;
     if (res.ok) {
       this.activeProviderName = exec.providerInstance.name;
+      if (options.recordHistory && res.text) {
+        const nowTs = Date.now();
+        const labelPrompt = String(prompt || 'Quan sát ảnh đính kèm').trim();
+        this.history.push({ role: 'user', content: `[Ảnh] ${labelPrompt}`, ts: nowTs });
+        this.history.push({ role: 'assistant', content: res.text, ts: nowTs });
+        const maxMessages = this.maxTurns * 2;
+        if (this.history.length > maxMessages) {
+          this.history = this.history.slice(this.history.length - maxMessages);
+        }
+        this._savePersistedHistory();
+      }
       this.writeLog(
         'LLM_VISION_OK',
         `Mode=${this.routingMode} | Route=${exec.routeReason} | Provider=${res.provider} | Model=${res.model} | Latency=${res.latencyMs}ms | Tokens=${res.tokens.total} | Emotion=${res.emotion}${exec.fallbackNote ? ' | Failover="' + exec.fallbackNote + '"' : ''}`
@@ -2167,7 +2228,7 @@ class AuraLLMRouter {
     }
     return {
       ...res,
-      routingMode: this.routingMode,
+      ...this.getPublicStatus(),
       routeReason: exec.routeReason,
       fallbackNote: exec.fallbackNote
     };

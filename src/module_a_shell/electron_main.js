@@ -9,7 +9,7 @@
  * - Phím tắt khẩn cấp toàn cục: Ctrl + Alt + Esc
  * ============================================================================
  */
-const { app, BrowserWindow, ipcMain, globalShortcut, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage } = require('electron');
 const { spawn } = require('child_process');
 const readline = require('readline');
 const path = require('path');
@@ -618,13 +618,48 @@ ipcMain.handle('llm:chat', async (_event, payload) => {
 ipcMain.handle('llm:vision', async (_event, payload) => {
   const router = ensureLlmRouter();
   return router.analyzeVision(payload.image || '', payload.prompt || '', {
-    provider: payload.provider || null
+    provider: payload.provider || null,
+    langHint: payload.lang || undefined,
+    recordHistory: Boolean(payload.recordHistory)
   });
+});
+
+ipcMain.handle('llm:get-history', async () => {
+  const router = ensureLlmRouter();
+  return router.getHistory();
 });
 
 ipcMain.handle('llm:clear-context', async () => {
   const router = ensureLlmRouter();
   return router.clearHistory();
+});
+
+// Chụp màn hình tức thì để hỏi đáp Vision Q&A (ẩn tạm cửa sổ Aura ~120ms để không che nội dung phía sau)
+ipcMain.handle('screen:capture-for-qa', async () => {
+  const service = ensureComputerUseService();
+  let hidOpacity = false;
+  try {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+      mainWindow.setOpacity(0);
+      hidOpacity = true;
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    const shot = await service.takeScreenshot();
+    if (shot && shot.success && shot.base64) {
+      return {
+        ...shot,
+        dataUrl: `data:image/jpeg;base64,${shot.base64}`
+      };
+    }
+    return { success: false, error: shot?.error || 'Không thể chụp màn hình.' };
+  } catch (err) {
+    writeLog('SCREEN_QA_ERR', `capture-for-qa failed: ${err.message}`);
+    return { success: false, error: err.message };
+  } finally {
+    if (hidOpacity && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setOpacity(1);
+    }
+  }
 });
 
 // ============================================================================
@@ -879,6 +914,13 @@ ipcMain.on('window:minimize', () => {
   }
 });
 
+ipcMain.on('window:hide-to-tray', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide();
+    writeLog('WINDOW', 'Window hidden to System Tray.');
+  }
+});
+
 ipcMain.on('window:close', () => {
   writeLog('WINDOW', 'Window closed by user button.');
   app.quit();
@@ -967,6 +1009,7 @@ async function runAutomatedButtonTests() {
 
   await sleep(3500);
 
+  await mainWindow.webContents.executeJavaScript(`document.body.classList.remove('compact-ui');`).catch(() => {});
   mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: 220, y: 240 });
   await sleep(150);
   writeLog(
@@ -1804,11 +1847,120 @@ async function runAutomatedStep6Tests() {
   app.quit();
 }
 
+let tray = null;
+
+function createAuraTrayIcon() {
+  const size = 16;
+  const buf = Buffer.alloc(size * size * 4);
+  const cx = 7.5;
+  const cy = 7.5;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const idx = (y * size + x) * 4;
+      if (dist <= 7.2) {
+        // BGRA gradient từ hồng (#f472b6) sang cyan (#38bdf8), tâm sáng trắng
+        const t = x / (size - 1);
+        let r = Math.round(244 * (1 - t) + 56 * t);
+        let g = Math.round(114 * (1 - t) + 189 * t);
+        let b = Math.round(182 * (1 - t) + 248 * t);
+        if (dist <= 2.3) {
+          r = 255;
+          g = 255;
+          b = 255;
+        }
+        const alpha = dist > 6.2 ? Math.max(0, Math.round((7.2 - dist) * 255)) : 255;
+        buf[idx] = b;
+        buf[idx + 1] = g;
+        buf[idx + 2] = r;
+        buf[idx + 3] = alpha;
+      } else {
+        buf[idx] = 0;
+        buf[idx + 1] = 0;
+        buf[idx + 2] = 0;
+        buf[idx + 3] = 0;
+      }
+    }
+  }
+  return nativeImage.createFromBitmap(buf, { width: size, height: size });
+}
+
+function showAndFocusAura() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
+
+function toggleAuraVisibility() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isVisible() && !mainWindow.isMinimized()) {
+    mainWindow.hide();
+    writeLog('TRAY', 'Hid Aura window via Tray/Hotkey.');
+  } else {
+    showAndFocusAura();
+    writeLog('TRAY', 'Restored Aura window via Tray/Hotkey.');
+  }
+}
+
+function setupSystemTray() {
+  if (tray) return;
+  try {
+    tray = new Tray(createAuraTrayIcon());
+    tray.setToolTip('AURA Desktop Assistant (Ctrl+Shift+A: Ẩn/Hiện · Ctrl+Shift+Space: Micro)');
+
+    const setModeFromTray = (mode) => {
+      showAndFocusAura();
+      applyWindowMode(mode);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('host:window_mode_changed', mode);
+      }
+    };
+
+    const contextMenu = Menu.buildFromTemplate([
+      { label: '✨ Hiện / Ẩn Aura (Ctrl+Shift+A)', click: () => toggleAuraVisibility() },
+      {
+        label: '🎤 Bật / Tắt Micro (Ctrl+Shift+Space)',
+        click: () => {
+          showAndFocusAura();
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('host:global_toggle_mic');
+          }
+        }
+      },
+      {
+        label: '👁️ Nhìn màn hình & Hỏi',
+        click: () => {
+          showAndFocusAura();
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('host:tray_screen_qa');
+          }
+        }
+      },
+      { type: 'separator' },
+      { label: '📌 Ghim góc màn hình', click: () => setModeFromTray('docked') },
+      { label: '🗖 Mở rộng cửa sổ', click: () => setModeFromTray('expanded') },
+      { label: '⛶ Toàn màn hình', click: () => setModeFromTray('fullscreen') },
+      { type: 'separator' },
+      { label: '🚪 Thoát hẳn Aura', click: () => app.quit() }
+    ]);
+
+    tray.setContextMenu(contextMenu);
+    tray.on('click', () => toggleAuraVisibility());
+    writeLog('TRAY', 'System Tray initialized successfully.');
+  } catch (err) {
+    writeLog('TRAY_ERR', `Không tạo được System Tray: ${err.message}`);
+  }
+}
+
 app.whenReady().then(() => {
   startTtsWorker();
   createMainWindow();
   ensureComputerUseService();
   startTelemetryLoop();
+  setupSystemTray();
 
   const hotkeyOk = globalShortcut.register('CommandOrControl+Alt+Escape', () => {
     writeLog('EMERGENCY_STOP', 'User pressed Ctrl+Alt+Esc! Stopping all Aura activities immediately.');
@@ -1824,6 +1976,18 @@ app.whenReady().then(() => {
     }
   });
   writeLog('SAFETY', `Global Emergency Hotkey (Ctrl+Alt+Esc) registered: ${hotkeyOk}`);
+
+  const micHotkeyOk = globalShortcut.register('CommandOrControl+Shift+Space', () => {
+    writeLog('HOTKEY', 'Global Mic Hotkey (Ctrl+Shift+Space) triggered.');
+    showAndFocusAura();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('host:global_toggle_mic');
+    }
+  });
+  const toggleWinHotkeyOk = globalShortcut.register('CommandOrControl+Shift+A', () => {
+    toggleAuraVisibility();
+  });
+  writeLog('HOTKEY', `Global Hotkeys registered: Ctrl+Shift+Space=${micHotkeyOk} | Ctrl+Shift+A=${toggleWinHotkeyOk}`);
 
   if (process.argv.includes('--autotest-buttons')) {
     runAutomatedButtonTests();
@@ -1851,5 +2015,9 @@ app.on('will-quit', () => {
     try { computerUseService.workerProc.kill(); } catch (_) {}
   }
   stopTtsWorker();
+  if (tray) {
+    try { tray.destroy(); } catch (_) {}
+    tray = null;
+  }
   globalShortcut.unregisterAll();
 });

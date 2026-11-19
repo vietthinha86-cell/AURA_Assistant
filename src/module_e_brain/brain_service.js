@@ -138,6 +138,33 @@ export class AuraBrainService extends IBrainProvider {
     return res;
   }
 
+  async analyzeVision(image, prompt, options = {}) {
+    if (!window.auraElectron || !window.auraElectron.llmVision) {
+      throw new Error('Không tìm thấy cầu nối IPC window.auraElectron.llmVision');
+    }
+    if (this.eventBus) {
+      this.eventBus.emit('llm:thinking', { text: prompt, language: options.lang || 'auto', vision: true });
+    }
+    const res = await window.auraElectron.llmVision({
+      image,
+      prompt,
+      lang: options.lang || 'auto',
+      provider: options.provider || null,
+      recordHistory: options.recordHistory !== false
+    });
+    if (this.eventBus) {
+      this.eventBus.emit('llm:response', res);
+    }
+    return res;
+  }
+
+  async getHistory() {
+    if (!window.auraElectron || !window.auraElectron.llmGetHistory) {
+      return { history: [], turns: 0, maxTurns: 15 };
+    }
+    return window.auraElectron.llmGetHistory();
+  }
+
   async clearMemory() {
     if (!window.auraElectron || !window.auraElectron.llmClearContext) {
       return null;

@@ -33,13 +33,15 @@
       <div class="drag-handle" id="dragHandle" title="Giữ chuột trái để kéo Aura đi bất kỳ đâu trên màn hình">
         <div class="status-dot" id="statusDot"></div>
         <span class="brand-title">AURA</span>
-        <span class="brand-sub" id="stepBadge">Bước 6: Computer-Use & Điều khiển máy</span>
+        <span class="brand-sub" id="stepBadge">Multi-Brain AI · Vision · Computer-Use</span>
       </div>
       <div class="win-buttons">
         <button class="win-btn active-mode" id="btnModeDocked" title="Ghim góc màn hình (Xuyên chuột vùng nền)">📌 Ghim</button>
         <button class="win-btn" id="btnModeExpanded" title="Mở rộng cửa sổ">🗖 Mở rộng</button>
         <button class="win-btn" id="btnModeFull" title="Phóng to toàn màn hình">⛶ Full</button>
+        <button class="win-btn" id="btnCompactUi" title="Bật/Tắt chế độ giao diện gọn (ẩn bảng kỹ thuật Telemetry & Console)">✨ Gọn</button>
         <button class="win-btn" id="btnDevTools" title="Mở/Đóng cửa sổ Console (F12)">🛠️ Log</button>
+        <button class="win-btn" id="btnHideTray" title="Ẩn gọn xuống khay hệ thống (Ctrl+Shift+A để hiện lại)">📥</button>
         <button class="win-btn" id="btnMinimize" title="Thu nhỏ xuống Taskbar">➖</button>
         <button class="win-btn danger" id="btnClose" title="Đóng Aura">✖</button>
       </div>
@@ -94,10 +96,13 @@
       <div class="speech-bubble">
         <div class="speech-header">
           <span id="emotionLabel">🌸 AURA (TRẠNG THÁI: DỊU DÀNG)</span>
-          <div class="lipsync-meter-wrap" title="Cường độ âm thanh AnalyserNode điều khiển khẩu hình miệng">
-            <span id="lipSyncRmsLabel">LipSync: 0%</span>
-            <div class="lipsync-meter-track">
-              <div class="lipsync-meter-fill" id="lipSyncMeterFill"></div>
+          <div class="speech-header-right">
+            <button class="stop-speak-btn" id="btnStopSpeak" title="Ngắt giọng đọc ngay lập tức (hoặc nhấn Esc)">🔇 Im lặng</button>
+            <div class="lipsync-meter-wrap" title="Cường độ âm thanh AnalyserNode điều khiển khẩu hình miệng">
+              <span id="lipSyncRmsLabel">LipSync: 0%</span>
+              <div class="lipsync-meter-track">
+                <div class="lipsync-meter-fill" id="lipSyncMeterFill"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -109,10 +114,10 @@
       <!-- Bước 3 & 4: Khung chat hội thoại thông minh + nút Bật/Tắt giọng nói rảnh tay + Xoá ngữ cảnh -->
       <div class="chat-panel" id="chatPanel">
         <div class="chat-log" id="chatLog">
-          <div class="chat-msg sys">Bấm 1 lần nút 🎤 (hoặc phím <b>F9</b>) để trò chuyện bằng giọng nói, hoặc gõ câu hỏi vào ô bên dưới để hỏi <b>Aura AI</b>.</div>
+          <div class="chat-msg sys">Bấm 🎤 (hoặc <b>F9</b> / toàn cục <b>Ctrl+Shift+Space</b>) để nói chuyện, bấm <b>👁️</b> hoặc dán ảnh <b>Ctrl+V</b> để hỏi về màn hình, hoặc gõ bên dưới hỏi <b>Aura AI</b>.</div>
         </div>
         <div class="stt-bar">
-          <button class="mic-btn" id="btnMic" title="Bấm 1 lần để Bật trò chuyện giọng nói rảnh tay, bấm lại để Tắt (Phím tắt: F9 hoặc Ctrl+Space)">
+          <button class="mic-btn" id="btnMic" title="Bấm 1 lần để Bật trò chuyện giọng nói rảnh tay, bấm lại để Tắt (Phím tắt: F9, Ctrl+Space hoặc toàn cục Ctrl+Shift+Space)">
             🎤 Bắt đầu trò chuyện (F9)
           </button>
           <button class="clear-ctx-btn" id="btnAutoPilot" title="Cho phép Aura tự động điều khiển chuột/phím mà không cần hỏi từng bước trong 10 phút">
@@ -131,16 +136,22 @@
         </div>
       </div>
 
-      <!-- Bước 2 & 4: Ô nhập chữ gửi cho AI trả lời (Enter) + nút Đọc nguyên văn + 2 nút thử nhanh -->
+      <!-- Bước 2 & 4: Ô nhập chữ gửi cho AI trả lời (Enter) + Chụp màn hình hỏi đáp + Đọc nguyên văn -->
       <div class="tts-panel" id="ttsPanel">
+        <div class="image-attach-bar hidden" id="imageAttachBar">
+          <img class="image-attach-thumb" id="imageAttachThumb" alt="Ảnh đính kèm" />
+          <span class="image-attach-info" id="imageAttachInfo">Ảnh đính kèm (sẵn sàng gửi Vision AI)</span>
+          <button class="image-attach-clear" id="btnClearAttach" title="Gỡ ảnh đính kèm">✖ Gỡ</button>
+        </div>
         <div class="tts-input-row">
+          <button class="screen-ask-btn" id="btnScreenAsk" title="Chụp nhanh màn hình hiện tại để hỏi Aura (đọc lỗi code, dịch nhanh, giải thích - không điều khiển chuột)">👁️</button>
           <input
             type="text"
             id="ttsInput"
             class="tts-input"
-            placeholder="Hỏi Aura bằng tiếng Việt hoặc tiếng Anh (Enter để gửi AI)..."
+            placeholder="Hỏi Aura, gõ lệnh, hoặc Ctrl+V dán ảnh (Enter để gửi AI)..."
           />
-          <button class="tts-speak-btn" id="btnAskAi" title="Gửi câu hỏi cho bộ não AI (Gemini/Claude) trả lời và đọc thành tiếng">💬 Gửi AI</button>
+          <button class="tts-speak-btn" id="btnAskAi" title="Gửi câu hỏi cho bộ não Multi-Brain AI (Auto / Gemini / Groq / OpenRouter / Claude) và đọc thành tiếng">💬 Gửi AI</button>
           <button class="ctrl-btn" id="btnSpeakInput" title="Chỉ đọc nguyên văn câu vừa gõ (TTS)">🔊 Đọc</button>
         </div>
         <div class="tts-quick-row">
@@ -272,10 +283,42 @@
     const valVoice = document.getElementById('valVoice');
     const lipSyncMeterFill = document.getElementById('lipSyncMeterFill');
     const lipSyncRmsLabel = document.getElementById('lipSyncRmsLabel');
+    const btnStopSpeak = document.getElementById('btnStopSpeak');
+    const btnScreenAsk = document.getElementById('btnScreenAsk');
+    const imageAttachBar = document.getElementById('imageAttachBar');
+    const imageAttachThumb = document.getElementById('imageAttachThumb');
+    const imageAttachInfo = document.getElementById('imageAttachInfo');
+    const btnClearAttach = document.getElementById('btnClearAttach');
+    const btnCompactUi = document.getElementById('btnCompactUi');
+    const btnHideTray = document.getElementById('btnHideTray');
+    const chatPanelEl = document.getElementById('chatPanel');
+    const ttsPanelEl = document.getElementById('ttsPanel');
 
     let manualLiteOverride = false;
     let isSynthesizing = false;
+    let isAuraSpeaking = false;
     let lastTtsResult = null;
+    let pendingImageAttachment = null;
+
+    function updateStopSpeakButton() {
+      if (!btnStopSpeak) return;
+      btnStopSpeak.classList.toggle('visible', Boolean(isSynthesizing || isAuraSpeaking));
+    }
+
+    function stopSpeakingNow(reason = 'người dùng bấm Im lặng') {
+      tts.stop();
+      if (avatar && typeof avatar.stop === 'function') avatar.stop();
+      isSynthesizing = false;
+      isAuraSpeaking = false;
+      updateStopSpeakButton();
+      if (typeof stt !== 'undefined' && stt) {
+        stt.setPausedForReply(false);
+        if (typeof sttStatusEl !== 'undefined' && sttStatusEl) {
+          sttStatusEl.textContent = stt.isConversationActive ? 'Đang lắng nghe…' : 'Mic: đang tắt';
+        }
+      }
+      logButtonClick('🔇 Im lặng', `Đã ngắt giọng đọc (${reason})`);
+    }
 
     // Expose trạng thái cho bộ kiểm thử tự động --autotest-step2
     window.__auraGetStep2State = () => {
@@ -336,6 +379,7 @@
     // ========================================================================
     eventBus.on('tts:synthesizing', (info) => {
       isSynthesizing = true;
+      updateStopSpeakButton();
       valVoice.textContent = `${info.lang.toUpperCase()} (${info.voice.replace('Neural', '')})`;
       speechText.innerHTML = `⏳ <i>Đang tổng hợp giọng nói (${info.voice})...</i><br/>"${info.text}"`;
       logButtonClick('TTS_START', `Ngôn ngữ=${info.lang} | Giọng=${info.voice}`);
@@ -343,6 +387,8 @@
 
     eventBus.on('tts:playing', (info) => {
       isSynthesizing = false;
+      isAuraSpeaking = true;
+      updateStopSpeakButton();
       lastTtsResult = info;
       emotionLabel.textContent = emotionLabels[info.emotion] || emotionLabels.neutral;
       speechText.innerHTML =
@@ -356,6 +402,8 @@
 
     eventBus.on('tts:ended', (info) => {
       isSynthesizing = false;
+      isAuraSpeaking = false;
+      updateStopSpeakButton();
       const stats = avatar.getStats();
       logButtonClick(
         'TTS_ENDED',
@@ -434,29 +482,88 @@
      * Đồng thời đo và ghi log đầy đủ: provider, số token, độ trễ từng khâu (STT, LLM, TTS) và tổng độ trễ đến lúc Aura bắt đầu nói.
      */
     async function askBrainAndSpeak(userText, options = {}) {
-      const clean = (userText || '').trim();
+      let clean = (userText || '').trim();
+      const attached = options.imageDataUrl
+        ? { dataUrl: options.imageDataUrl, label: options.imageLabel || 'Ảnh đính kèm' }
+        : pendingImageAttachment;
+
+      if (!clean && attached) {
+        clean = 'Hãy nhìn ảnh này, tóm tắt ngắn gọn nội dung và nếu thấy lỗi code hay giao diện thì chỉ rõ nguyên nhân và cách sửa.';
+      }
       if (!clean) return null;
 
-      const source = options.source || 'text';
+      if (attached && !options.imageDataUrl) {
+        clearImageAttachment();
+      }
+
+      const source = options.source || (attached ? 'vision' : 'text');
       const sttLatencyMs = Number(options.sttLatencyMs || 0);
       const tTurnFinished = performance.now();
 
       if (options.showUserChat !== false) {
-        addChat('user', clean, source === 'text' ? 'Gõ chữ' : '');
+        addChat(
+          'user',
+          clean,
+          attached ? `👁️ ${attached.label}` : (source === 'text' ? 'Gõ chữ' : ''),
+          attached ? { imageDataUrl: attached.dataUrl } : {}
+        );
       }
 
-      speechText.innerHTML = `🧠 <i>Aura đang suy nghĩ câu trả lời...</i>`;
-      sttStatusEl.textContent = 'AI đang suy nghĩ…';
+      speechText.innerHTML = attached
+        ? `👁️ <i>Aura đang phân tích hình ảnh...</i>`
+        : `🧠 <i>Aura đang suy nghĩ câu trả lời...</i>`;
+      sttStatusEl.textContent = attached ? 'AI đang xem ảnh…' : 'AI đang suy nghĩ…';
 
       const tLlm0 = performance.now();
       let llmRes = null;
       try {
+        const hasActionVerb = /\b(bấm vào|bam vao|click|double click|nhấp đúp|cuộn|scroll|mở notepad rồi gõ|tìm phim hài rồi bấm)\b/i.test(clean);
+        const isReadOnlyScreenQa =
+          !attached &&
+          !options.computerUse &&
+          !hasActionVerb &&
+          /\b(nhìn màn hình|xem màn hình|đọc màn hình|trên màn hình đang|màn hình đang báo lỗi|giải thích màn hình|phân tích màn hình|xem giúp màn hình|đọc lỗi trên màn hình)\b/i.test(clean);
+
         const isComputerUseIntent = Boolean(
-          options.computerUse ||
-          /\b(bấm vào|click|double click|nhấp đúp|cuộn|scroll|mở notepad rồi gõ|tìm phim hài rồi bấm|chụp màn hình|quan sát màn hình)\b/i.test(clean)
+          !attached &&
+          !isReadOnlyScreenQa &&
+          (options.computerUse ||
+            /\b(bấm vào|click|double click|nhấp đúp|cuộn|scroll|mở notepad rồi gõ|tìm phim hài rồi bấm|chụp màn hình|quan sát màn hình)\b/i.test(clean))
         );
 
-        if (isComputerUseIntent && window.auraElectron && typeof window.auraElectron.computerUseRunTask === 'function') {
+        if (attached) {
+          llmRes = await brain.analyzeVision(attached.dataUrl, clean, {
+            lang: options.lang || 'auto',
+            provider: options.provider || null,
+            recordHistory: !options.skipHistory
+          });
+        } else if (isReadOnlyScreenQa && window.auraElectron && typeof window.auraElectron.captureScreenForQa === 'function') {
+          speechText.innerHTML = `📸 <i>Aura đang chụp nhanh màn hình để xem giúp anh...</i>`;
+          sttStatusEl.textContent = 'Đang chụp màn hình…';
+          const shot = await window.auraElectron.captureScreenForQa();
+          if (shot && shot.success && shot.dataUrl) {
+            speechText.innerHTML = `👁️ <i>Aura đang đọc nội dung trên màn hình...</i>`;
+            sttStatusEl.textContent = 'AI đang xem màn hình…';
+            llmRes = await brain.analyzeVision(shot.dataUrl, clean, {
+              lang: options.lang || 'auto',
+              provider: options.provider || null,
+              recordHistory: !options.skipHistory
+            });
+          } else {
+            llmRes = {
+              ok: false,
+              errorCode: 'SCREEN_CAPTURE_ERR',
+              provider: 'vision',
+              model: '',
+              text: `Em chưa chụp được màn hình: ${shot?.error || 'lỗi không xác định'}.`,
+              emotion: 'sorry',
+              avatarEmotion: 'apologetic',
+              lang: 'vi',
+              latencyMs: Math.round(performance.now() - tLlm0),
+              tokens: { input: 0, output: 0, total: 0 }
+            };
+          }
+        } else if (isComputerUseIntent && window.auraElectron && typeof window.auraElectron.computerUseRunTask === 'function') {
           speechText.innerHTML = `🤖 <i>Aura đang nhìn màn hình và điều khiển máy tính...</i>`;
           sttStatusEl.textContent = 'Aura đang điều khiển…';
           const cuRes = await window.auraElectron.computerUseRunTask(clean, options);
@@ -589,18 +696,192 @@
       return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     }
 
-    function addChat(kind, text, meta = '') {
+    function renderSafeMarkdown(rawText) {
+      const codeBlocks = [];
+      // Tách code block trước để không bị xử lý inline markdown bên trong code
+      const withPlaceholders = String(rawText || '').replace(/```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)```/g, (_m, lang, code) => {
+        const idx = codeBlocks.length;
+        const cleanLang = escapeHtml((lang || 'code').trim() || 'code');
+        const cleanCode = escapeHtml(String(code || '').replace(/\n$/, ''));
+        codeBlocks.push(
+          `<div class="md-code-wrap">` +
+            `<div class="md-code-hdr"><span>${cleanLang}</span><button type="button" class="md-copy-btn">📋 Copy</button></div>` +
+            `<pre class="md-pre"><code>${cleanCode}</code></pre>` +
+          `</div>`
+        );
+        return `@@CODEBLOCK_${idx}@@`;
+      });
+
+      let html = escapeHtml(withPlaceholders)
+        .replace(/`([^`\n]+)`/g, '<code class="md-inline-code">$1</code>')
+        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+        .replace(/\n/g, '<br/>');
+
+      codeBlocks.forEach((blockHtml, i) => {
+        html = html.replace(`@@CODEBLOCK_${i}@@`, blockHtml);
+      });
+      return html;
+    }
+
+    chatLog.addEventListener('click', async (e) => {
+      const copyBtn = e.target && e.target.closest ? e.target.closest('.md-copy-btn') : null;
+      if (!copyBtn) return;
+      const wrap = copyBtn.closest('.md-code-wrap');
+      const codeEl = wrap ? wrap.querySelector('pre code') : null;
+      if (!codeEl) return;
+      try {
+        await navigator.clipboard.writeText(codeEl.textContent || '');
+        const oldText = copyBtn.textContent;
+        copyBtn.textContent = '✅ Đã copy';
+        setTimeout(() => { copyBtn.textContent = oldText; }, 1400);
+      } catch (_) {}
+    });
+
+    function addChat(kind, text, meta = '', opts = {}) {
       const div = document.createElement('div');
       div.className = `chat-msg ${kind}`;
       const who = kind === 'user' ? '🧑 Bạn' : kind === 'aura' ? '🌸 Aura' : 'ℹ️';
+      const bodyHtml = kind === 'aura' ? renderSafeMarkdown(text) : escapeHtml(text).replace(/\n/g, '<br/>');
+      const imgHtml = opts && opts.imageDataUrl
+        ? `<img class="chat-attach-img" src="${escapeHtml(opts.imageDataUrl)}" alt="Ảnh gửi kèm" />`
+        : '';
       div.innerHTML =
         `<span class="chat-who">${who}</span>` +
         (meta ? `<span class="chat-meta">${escapeHtml(meta)}</span>` : '') +
-        `<div class="chat-text">${escapeHtml(text)}</div>`;
+        `<div class="chat-text">${bodyHtml}${imgHtml}</div>`;
       chatLog.appendChild(div);
-      while (chatLog.children.length > 40) chatLog.removeChild(chatLog.firstChild);
+      while (chatLog.children.length > 60) chatLog.removeChild(chatLog.firstChild);
       chatLog.scrollTop = chatLog.scrollHeight;
     }
+
+    function setImageAttachment(dataUrl, label = 'Ảnh đính kèm') {
+      pendingImageAttachment = { dataUrl, label };
+      if (imageAttachThumb) imageAttachThumb.src = dataUrl;
+      if (imageAttachInfo) imageAttachInfo.textContent = `${label} — Gõ câu hỏi rồi nhấn Enter (hoặc Enter ngay để phân tích)`;
+      if (imageAttachBar) imageAttachBar.classList.remove('hidden');
+      ttsInput.focus();
+    }
+
+    function clearImageAttachment() {
+      pendingImageAttachment = null;
+      if (imageAttachBar) imageAttachBar.classList.add('hidden');
+      if (imageAttachThumb) imageAttachThumb.removeAttribute('src');
+    }
+
+    function resizeImageBlobToDataUrl(blob, maxDim = 1280) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Không đọc được ảnh'));
+        reader.onload = () => {
+          const img = new Image();
+          img.onerror = () => reject(new Error('Ảnh không hợp lệ'));
+          img.onload = () => {
+            const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
+            const w = Math.max(1, Math.round(img.width * scale));
+            const h = Math.max(1, Math.round(img.height * scale));
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve({
+              dataUrl: canvas.toDataURL('image/jpeg', 0.85),
+              width: w,
+              height: h
+            });
+          };
+          img.src = reader.result;
+        };
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    async function captureAndAttachScreen(autoSubmitIfTyped = true) {
+      if (!window.auraElectron || typeof window.auraElectron.captureScreenForQa !== 'function') {
+        addChat('sys', '⚠️ Chưa hỗ trợ chụp màn hình trên môi trường này.');
+        return;
+      }
+      if (btnScreenAsk) btnScreenAsk.disabled = true;
+      try {
+        speechText.innerHTML = '📸 <i>Đang chụp nhanh màn hình hiện tại...</i>';
+        const shot = await window.auraElectron.captureScreenForQa();
+        if (!shot || !shot.success || !shot.dataUrl) {
+          addChat('sys', `⚠️ Không thể chụp màn hình: ${shot?.error || 'lỗi không xác định'}`);
+          return;
+        }
+        const label = `📸 Màn hình (${shot.scaledW}x${shot.scaledH})`;
+        setImageAttachment(shot.dataUrl, label);
+        logButtonClick('👁️ Nhìn màn hình', `${shot.scaledW}x${shot.scaledH} (${Math.round((shot.sizeBytes || 0) / 1024)}KB)`);
+        const typed = (ttsInput.value || '').trim();
+        if (autoSubmitIfTyped && typed) {
+          ttsInput.value = '';
+          await askBrainAndSpeak(typed, { source: 'vision', showUserChat: true, speak: true });
+        } else {
+          speechText.innerHTML = '👁️ Đã chụp xong màn hình! Anh gõ câu hỏi bên dưới (hoặc bấm <b>Enter</b> luôn) để Aura xem giúp nhé.';
+        }
+      } finally {
+        if (btnScreenAsk) btnScreenAsk.disabled = false;
+      }
+    }
+
+    if (btnClearAttach) {
+      btnClearAttach.addEventListener('click', () => {
+        clearImageAttachment();
+        logButtonClick('✖ Gỡ ảnh', 'Đã gỡ ảnh đính kèm');
+      });
+    }
+
+    if (btnScreenAsk) {
+      btnScreenAsk.addEventListener('click', () => captureAndAttachScreen(true));
+    }
+
+    if (btnStopSpeak) {
+      btnStopSpeak.addEventListener('click', () => stopSpeakingNow('click nút Im lặng'));
+    }
+
+    // Dán ảnh trực tiếp bằng Ctrl+V vào cửa sổ Aura
+    window.addEventListener('paste', async (e) => {
+      const items = e.clipboardData && e.clipboardData.items ? Array.from(e.clipboardData.items) : [];
+      const imgItem = items.find((it) => it.type && it.type.startsWith('image/'));
+      if (!imgItem) return;
+      e.preventDefault();
+      const file = imgItem.getAsFile();
+      if (!file) return;
+      try {
+        const resized = await resizeImageBlobToDataUrl(file, 1280);
+        setImageAttachment(resized.dataUrl, `🖼️ Ảnh dán Ctrl+V (${resized.width}x${resized.height})`);
+        logButtonClick('Ctrl+V Ảnh', `${resized.width}x${resized.height}`);
+      } catch (err) {
+        addChat('sys', `⚠️ Không xử lý được ảnh dán: ${err.message}`);
+      }
+    });
+
+    // Kéo-thả ảnh vào khung Chat / ô nhập
+    [chatPanelEl, ttsPanelEl].forEach((zone) => {
+      if (!zone) return;
+      zone.addEventListener('dragover', (e) => {
+        if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+          e.preventDefault();
+          zone.classList.add('drop-active');
+        }
+      });
+      zone.addEventListener('dragleave', () => zone.classList.remove('drop-active'));
+      zone.addEventListener('drop', async (e) => {
+        zone.classList.remove('drop-active');
+        const files = e.dataTransfer && e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+        const imgFile = files.find((f) => f.type && f.type.startsWith('image/'));
+        if (!imgFile) return;
+        e.preventDefault();
+        try {
+          const resized = await resizeImageBlobToDataUrl(imgFile, 1280);
+          setImageAttachment(resized.dataUrl, `🖼️ ${imgFile.name} (${resized.width}x${resized.height})`);
+          logButtonClick('Kéo-thả Ảnh', `${imgFile.name} (${resized.width}x${resized.height})`);
+        } catch (err) {
+          addChat('sys', `⚠️ Không đọc được ảnh kéo-thả: ${err.message}`);
+        }
+      });
+    });
 
     function resetMicButton() {
       btnMic.classList.remove('recording', 'processing');
@@ -738,6 +1019,15 @@
     });
 
     window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && (isSynthesizing || isAuraSpeaking)) {
+        const confirmOpen = confirmModal && confirmModal.style.display !== 'none';
+        const logOpen = logModal && logModal.style.display !== 'none';
+        if (!confirmOpen && !logOpen) {
+          e.preventDefault();
+          stopSpeakingNow('phím Esc');
+          return;
+        }
+      }
       const isF9 = e.key === 'F9';
       const isCtrlSpace = e.ctrlKey && e.code === 'Space';
       if (!isF9 && !isCtrlSpace) return;
@@ -850,8 +1140,8 @@
       });
     });
 
-    // Khởi tạo trạng thái LLM ban đầu và hiển thị thông báo rõ ràng nếu thiếu key một bên
-    brain.init().then((st) => {
+    // Khởi tạo trạng thái LLM ban đầu, khôi phục lịch sử chat gần nhất và hiển thị thông báo rõ ràng
+    brain.init().then(async (st) => {
       if (st) {
         updateLlmTelemetry(st);
         if (st.startupNotice) {
@@ -859,6 +1149,16 @@
           logButtonClick('LLM_STATUS', st.startupNotice);
         }
       }
+      try {
+        const saved = await brain.getHistory();
+        if (saved && Array.isArray(saved.history) && saved.history.length > 0) {
+          const recent = saved.history.slice(-16);
+          addChat('sys', `📜 Đã khôi phục ${saved.turns} lượt trò chuyện gần nhất từ phiên trước.`);
+          for (const m of recent) {
+            addChat(m.role === 'user' ? 'user' : 'aura', m.content, 'Phiên trước');
+          }
+        }
+      } catch (_) {}
     });
 
     // ========================================================================
@@ -882,9 +1182,9 @@
     if (btnAskAi) {
       btnAskAi.addEventListener('click', async () => {
         const val = (ttsInput.value || '').trim();
-        if (!val) return;
+        if (!val && !pendingImageAttachment) return;
         ttsInput.value = '';
-        await askBrainAndSpeak(val, { source: 'text', sttLatencyMs: 0, showUserChat: true, speak: true });
+        await askBrainAndSpeak(val, { source: pendingImageAttachment ? 'vision' : 'text', sttLatencyMs: 0, showUserChat: true, speak: true });
       });
     }
 
@@ -896,9 +1196,9 @@
       if (e.key === 'Enter') {
         e.preventDefault();
         const val = (ttsInput.value || '').trim();
-        if (!val) return;
+        if (!val && !pendingImageAttachment) return;
         ttsInput.value = '';
-        await askBrainAndSpeak(val, { source: 'text', sttLatencyMs: 0, showUserChat: true, speak: true });
+        await askBrainAndSpeak(val, { source: pendingImageAttachment ? 'vision' : 'text', sttLatencyMs: 0, showUserChat: true, speak: true });
       }
     });
 
@@ -970,7 +1270,8 @@
     });
 
     function setUIMode(mode, btnId, btnLabel) {
-      document.body.className = `mode-${mode}`;
+      const keepCompact = document.body.classList.contains('compact-ui');
+      document.body.className = `mode-${mode}${keepCompact ? ' compact-ui' : ''}`;
       ['btnModeDocked', 'btnModeExpanded', 'btnModeFull'].forEach(id => {
         document.getElementById(id)?.classList.remove('active-mode');
       });
@@ -998,6 +1299,40 @@
       logButtonClick('🛠️ Log', 'Bật/Tắt cửa sổ DevTools Console');
       if (window.auraElectron) window.auraElectron.toggleDevTools();
     });
+
+    function setCompactUiMode(enabled, persist = true) {
+      document.body.classList.toggle('compact-ui', Boolean(enabled));
+      if (btnCompactUi) {
+        btnCompactUi.classList.toggle('compact-active', Boolean(enabled));
+        btnCompactUi.textContent = enabled ? '🔧 Đầy đủ' : '✨ Gọn';
+      }
+      if (persist) {
+        try { localStorage.setItem('aura_compact_ui', enabled ? '1' : '0'); } catch (_) {}
+      }
+      setTimeout(() => avatar._onResize(), 60);
+    }
+
+    if (btnCompactUi) {
+      try {
+        if (localStorage.getItem('aura_compact_ui') === '1') {
+          setCompactUiMode(true, false);
+        }
+      } catch (_) {}
+      btnCompactUi.addEventListener('click', () => {
+        const next = !document.body.classList.contains('compact-ui');
+        setCompactUiMode(next, true);
+        logButtonClick('✨ Gọn / Đầy đủ', `CompactUI=${next}`);
+      });
+    }
+
+    if (btnHideTray) {
+      btnHideTray.addEventListener('click', () => {
+        logButtonClick('📥 Ẩn khay', 'Ẩn cửa sổ Aura xuống System Tray');
+        if (window.auraElectron && window.auraElectron.hideToTray) {
+          window.auraElectron.hideToTray();
+        }
+      });
+    }
 
     document.getElementById('btnMinimize').addEventListener('click', () => {
       logButtonClick('➖ Thu nhỏ', 'Thu nhỏ cửa sổ xuống Taskbar');
@@ -1134,6 +1469,10 @@
 
     function handleEmergencyStop() {
       tts.stop();
+      if (avatar && typeof avatar.stop === 'function') avatar.stop();
+      isSynthesizing = false;
+      isAuraSpeaking = false;
+      updateStopSpeakButton();
       stt.cancel();
       resetMicButton();
       speechText.innerHTML = `<b style="color:#f87171">🛑 [KHẨN CẤP - Ctrl+Alt+Esc] Đã dừng ngay lập tức mọi thao tác và giọng nói của Aura!</b>`;
@@ -1143,6 +1482,26 @@
     if (window.auraElectron) {
       window.auraElectron.onTelemetry(handleHostTelemetry);
       window.auraElectron.onEmergencyStop(handleEmergencyStop);
+      if (window.auraElectron.onGlobalToggleMic) {
+        window.auraElectron.onGlobalToggleMic(() => handleToggleVoiceChat('phím toàn cục Ctrl+Shift+Space'));
+      }
+      if (window.auraElectron.onTrayScreenQa) {
+        window.auraElectron.onTrayScreenQa(() => captureAndAttachScreen(false));
+      }
+      if (window.auraElectron.onHostWindowMode) {
+        window.auraElectron.onHostWindowMode((mode) => {
+          const btnMap = {
+            docked: 'btnModeDocked',
+            expanded: 'btnModeExpanded',
+            fullscreen: 'btnModeFull'
+          };
+          document.body.className = `mode-${mode}` + (document.body.classList.contains('compact-ui') ? ' compact-ui' : '');
+          ['btnModeDocked', 'btnModeExpanded', 'btnModeFull'].forEach((id) => {
+            document.getElementById(id)?.classList.toggle('active-mode', id === btnMap[mode]);
+          });
+          setTimeout(() => avatar._onResize(), 60);
+        });
+      }
     }
 
     // ========================================================================

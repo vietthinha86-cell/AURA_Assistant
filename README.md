@@ -202,7 +202,24 @@ Aura được tích hợp công cụ kiểm thử trực tiếp vạn năng **`r
 
 ---
 
-## 9. Khởi Động Ứng Dụng
+## 9. Nâng Cấp Trải Nghiệm Hằng Ngày (Desktop Companion UX)
+
+- **System Tray & Phím Tắt Toàn Cục:**
+  - Icon khay hệ thống Windows (click trái để Ẩn/Hiện nhanh, chuột phải mở menu chuyển chế độ cửa sổ / bật micro / nhìn màn hình).
+  - Nút **`📥`** trên thanh tiêu đề để ẩn gọn Aura xuống khay hệ thống mà không tắt ứng dụng.
+  - Phím tắt toàn cục hoạt động từ mọi ứng dụng: **`Ctrl + Shift + Space`** (bật/tắt micro trò chuyện) và **`Ctrl + Shift + A`** (ẩn/hiện cửa sổ Aura).
+- **Nhìn Màn Hình & Hỏi Đáp (`👁️`) + Dán / Kéo-Thả Ảnh (`Ctrl + V`):**
+  - Chụp nhanh màn hình hiện tại (tự ẩn tạm cửa sổ Aura để không che nội dung phía sau) hoặc dán ảnh từ Clipboard / kéo-thả file ảnh trực tiếp vào khung chat để gửi qua Vision AI (`Claude` / `Gemini` / `Groq` / `OpenRouter`) mà không điều khiển chuột phím.
+- **Ngắt Lời Giữa Chừng (`🔇 Im lặng` / Phím `Esc`):**
+  - Dừng ngay giọng đọc TTS + khẩu hình VRM khi Aura đang trả lời dài và mở lại micro tức thì.
+- **Lưu Lịch Sử Hội Thoại Bền Vững:**
+  - Tự động lưu các lượt hội thoại gần nhất vào `logs/chat_history.json` (đã được `.gitignore` giữ cục bộ, không đẩy lên Git) và tự khôi phục khi mở lại Aura.
+- **Chế Độ Giao Diện Gọn (`✨ Gọn` / `🔧 Đầy đủ`) & Markdown Code Copy:**
+  - Ẩn bớt bảng Telemetry/Console kỹ thuật khi dùng hằng ngày; khung chat hỗ trợ render Markdown, khối code và nút **📋 Copy** an toàn.
+
+---
+
+## 10. Khởi Động Ứng Dụng
 
 Nhấp đúp chuột vào file **`KHOI_DONG_AURA.bat`** để khởi chạy trợ lý ảo **AURA**.
 Mọi tính năng giọng nói, mô hình VRM 3D, bộ não AI, hệ thống công cụ, Computer-Use và Trình kiểm thử thực tế vạn năng đã được đóng gói sẵn sàng.

@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('auraElectron', {
   setWindowMode: (mode) => ipcRenderer.send('window:mode', mode),
   moveWindowBy: (dx, dy) => ipcRenderer.send('window:move-by', { dx, dy }),
   minimizeWindow: () => ipcRenderer.send('window:minimize'),
+  hideToTray: () => ipcRenderer.send('window:hide-to-tray'),
   closeWindow: () => ipcRenderer.send('window:close'),
   toggleDevTools: () => ipcRenderer.send('window:toggle-devtools'),
   reportFps: (fps, isLiteMode) => ipcRenderer.send('telemetry:fps', { fps, isLiteMode }),
@@ -18,10 +19,15 @@ contextBridge.exposeInMainWorld('auraElectron', {
   llmSetMode: (mode) => ipcRenderer.invoke('llm:set-mode', mode),
   llmChat: (payload) => ipcRenderer.invoke('llm:chat', payload),
   llmVision: (payload) => ipcRenderer.invoke('llm:vision', payload),
+  llmGetHistory: () => ipcRenderer.invoke('llm:get-history'),
   llmClearContext: () => ipcRenderer.invoke('llm:clear-context'),
+  captureScreenForQa: () => ipcRenderer.invoke('screen:capture-for-qa'),
   onSttStatus: (callback) => ipcRenderer.on('stt:status', (_event, data) => callback(data)),
   onTelemetry: (callback) => ipcRenderer.on('host:telemetry', (_event, data) => callback(data)),
   onEmergencyStop: (callback) => ipcRenderer.on('host:emergency_stop', () => callback()),
+  onGlobalToggleMic: (callback) => ipcRenderer.on('host:global_toggle_mic', () => callback()),
+  onTrayScreenQa: (callback) => ipcRenderer.on('host:tray_screen_qa', () => callback()),
+  onHostWindowMode: (callback) => ipcRenderer.on('host:window_mode_changed', (_event, mode) => callback(mode)),
 
   // BƯỚC 5: IPC CÔNG CỤ & CƠ CHẾ XÁC NHẬN AN TOÀN
   toolConfirmResponse: (id, confirmed) => ipcRenderer.send('tool:confirm_response', { id, confirmed }),
