@@ -214,6 +214,9 @@ Aura được tích hợp công cụ kiểm thử trực tiếp vạn năng **`r
   - Dừng ngay giọng đọc TTS + khẩu hình VRM khi Aura đang trả lời dài và mở lại micro tức thì.
 - **Lưu Lịch Sử Hội Thoại Bền Vững:**
   - Tự động lưu các lượt hội thoại gần nhất vào `logs/chat_history.json` (đã được `.gitignore` giữ cục bộ, không đẩy lên Git) và tự khôi phục khi mở lại Aura.
+- **Giọng Nữ Việt AI Tự Nhiên & STT Siêu Tốc:**
+  - Hỗ trợ 5 giọng nữ Việt tự nhiên qua **Gemini Neural TTS** (`gemini-3.8-flash-lite-tts`: **Leda**, **Aoede**, **Zephyr**, **Sulafat**, **Kore**) đổi trực tiếp 1-click trên giao diện kèm cache RAM/Disk và tự dự phòng sang Edge-TTS (`HoaiMy` / `NamMinh`).
+  - Hỗ trợ **Groq Whisper Large-v3-Turbo** (`STT_PROVIDER=auto`) nhận diện giọng nói tiếng Việt siêu nhanh (~0.4–0.9s, **0 MB RAM local**), tự fallback sang Gemini Cloud / `faster-whisper` local khi offline.
 - **Chế Độ Giao Diện Gọn (`✨ Gọn` / `🔧 Đầy đủ`) & Markdown Code Copy:**
   - Ẩn bớt bảng Telemetry/Console kỹ thuật khi dùng hằng ngày; khung chat hỗ trợ render Markdown, khối code và nút **📋 Copy** an toàn.
 

@@ -130,8 +130,17 @@
             📋 Xem log
           </button>
           <label class="echo-toggle" title="Tự động đọc thành tiếng câu trả lời của Aura">
-            <input type="checkbox" id="chkEcho" checked /> Đọc trả lời
+            <input type="checkbox" id="chkEcho" checked /> Đọc
           </label>
+          <select id="voiceViSelect" class="voice-select" title="Chọn giọng đọc Tiếng Việt của Aura (giọng AI tự nhiên Gemini hoặc Edge nhanh)">
+            <option value="gemini:Leda">🌸 Leda (Nữ trẻ AI)</option>
+            <option value="gemini:Aoede">💕 Aoede (Nữ ấm áp AI)</option>
+            <option value="gemini:Zephyr">✨ Zephyr (Nữ tươi sáng AI)</option>
+            <option value="gemini:Sulafat">🎀 Sulafat (Nữ ngọt ngào AI)</option>
+            <option value="gemini:Kore">💎 Kore (Nữ rõ ràng AI)</option>
+            <option value="vi-VN-HoaiMyNeural">⚡ HoaiMy (Edge nhanh)</option>
+            <option value="vi-VN-NamMinhNeural">🎙️ NamMinh (Nam Edge)</option>
+          </select>
           <span class="stt-status" id="sttStatus">Mic: đang tắt</span>
         </div>
       </div>
@@ -264,12 +273,35 @@
       maxTextureSize: 1024
     });
 
+    const savedVoiceVi = (() => {
+      try { return localStorage.getItem('aura_voice_vi') || 'gemini:Leda'; } catch (_) { return 'gemini:Leda'; }
+    })();
+
     const tts = new EdgeTTSService(eventBus, avatar, {
-      voiceVi: 'vi-VN-HoaiMyNeural',
+      voiceVi: savedVoiceVi,
       voiceEn: 'en-US-AriaNeural',
-      rate: '+8%',
-      pitch: '+5Hz'
+      rate: '+10%',
+      pitch: '+0Hz'
     });
+
+    const voiceViSelect = document.getElementById('voiceViSelect');
+    if (voiceViSelect) {
+      if (Array.from(voiceViSelect.options).some((o) => o.value === savedVoiceVi)) {
+        voiceViSelect.value = savedVoiceVi;
+      }
+      voiceViSelect.addEventListener('change', () => {
+        const chosen = voiceViSelect.value;
+        tts.setVoiceVi(chosen);
+        try { localStorage.setItem('aura_voice_vi', chosen); } catch (_) {}
+        const label = voiceViSelect.options[voiceViSelect.selectedIndex]?.textContent || chosen;
+        if (valVoice) valVoice.textContent = label;
+        addChat('sys', `🔊 Đã đổi giọng đọc Tiếng Việt sang: ${label}`);
+        logButtonClick('🎙️ Đổi giọng VI', `${chosen} (${label})`);
+        if (chkEcho && chkEcho.checked) {
+          speakWithTts('Dạ, em đã đổi sang giọng mới rồi ạ!', 'vi', '🎙️ Thử giọng mới', 'happy');
+        }
+      });
+    }
 
     const brain = new AuraBrainService(eventBus);
     const valLlm = document.getElementById('valLlm');
@@ -281,6 +313,10 @@
     const miniConsole = document.getElementById('miniConsole');
     const ttsInput = document.getElementById('ttsInput');
     const valVoice = document.getElementById('valVoice');
+    if (valVoice && voiceViSelect) {
+      const initLabel = voiceViSelect.options[voiceViSelect.selectedIndex]?.textContent || savedVoiceVi;
+      valVoice.textContent = initLabel;
+    }
     const lipSyncMeterFill = document.getElementById('lipSyncMeterFill');
     const lipSyncRmsLabel = document.getElementById('lipSyncRmsLabel');
     const btnStopSpeak = document.getElementById('btnStopSpeak');
@@ -391,12 +427,14 @@
       updateStopSpeakButton();
       lastTtsResult = info;
       emotionLabel.textContent = emotionLabels[info.emotion] || emotionLabels.neutral;
+      const durText = typeof info.durationSec === 'number' && info.durationSec > 0 ? ` | ~${info.durationSec}s` : '';
+      const cacheLabel = info.cached ? ' · cache' : '';
       speechText.innerHTML =
         `🔊 <b>[${info.voice}]</b> "${info.text}" ` +
-        `<span style="color:#38bdf8;font-size:11px;">(Độ trễ: ${info.totalLatencyMs}ms | ${info.durationSec}s)</span>`;
+        `<span style="color:#38bdf8;font-size:11px;">(Độ trễ: ${info.totalLatencyMs}ms${durText}${cacheLabel})</span>`;
       logButtonClick(
         'TTS_PLAYING',
-        `Voice=${info.voice} | Latency=${info.totalLatencyMs}ms (FirstChunk=${info.firstChunkMs}ms) | Duration=${info.durationSec}s`
+        `Voice=${info.voice} | Latency=${info.totalLatencyMs}ms (FirstChunk=${info.firstChunkMs}ms)${durText}`
       );
     });
 
@@ -986,7 +1024,11 @@
         valStt.textContent = 'đang nạp model…';
         valStt.className = 'tele-val warn';
       } else if (s.state === 'ready') {
-        valStt.textContent = `đã nạp (small/int8) ${s.rssMb ? Math.round(s.rssMb) + 'MB' : ''}`;
+        if (s.provider && !s.rssMb) {
+          valStt.textContent = `${s.provider} (0 MB RAM)`;
+        } else {
+          valStt.textContent = `đã nạp (small/int8) ${s.rssMb ? Math.round(s.rssMb) + 'MB' : ''}`;
+        }
         valStt.className = 'tele-val good';
       } else {
         valStt.textContent = 'đã giải phóng (trả RAM)';

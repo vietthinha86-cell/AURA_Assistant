@@ -158,7 +158,9 @@ async def synthesize_with_retry(text: str, voice: str, rate: str, pitch: str, sk
     last_err = None
     for attempt in range(max_retries):
         try:
+            use_pitch = pitch
             if attempt > 0:
+                use_pitch = "+0Hz"
                 try:
                     DRM.clock_skew_seconds = 0.0
                     if os.path.exists(skew_file):
@@ -167,7 +169,7 @@ async def synthesize_with_retry(text: str, voice: str, rate: str, pitch: str, sk
                     pass
             with_boundary = attempt < 1
             return await asyncio.wait_for(
-                _single_attempt(text, voice, rate, pitch, skew_file, with_boundary=with_boundary, timeout=timeout),
+                _single_attempt(text, voice, rate, use_pitch, skew_file, with_boundary=with_boundary, timeout=timeout),
                 timeout=timeout + 1.0
             )
         except Exception as e:
@@ -254,8 +256,8 @@ async def handle_synthesize(req: dict, output_dir: str, skew_file: str):
     if not emotion or emotion == "auto":
         emotion = detect_emotion(text)
 
-    rate = req.get("rate") or os.environ.get("TTS_RATE", "+8%")
-    pitch = req.get("pitch") or os.environ.get("TTS_PITCH", "+5Hz")
+    rate = req.get("rate") or os.environ.get("TTS_RATE", "+10%")
+    pitch = req.get("pitch") or os.environ.get("TTS_PITCH", "+0Hz")
     timeout = float(req.get("timeout") or 6.0)
     max_retries = int(req.get("maxRetries") or 2)
 

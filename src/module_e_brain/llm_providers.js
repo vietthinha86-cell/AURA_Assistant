@@ -375,15 +375,13 @@ function buildAuraCompactSystemPrompt(langHint = 'auto') {
   const langRule =
     langHint === 'en'
       ? 'Reply in natural English (en).'
-      : langHint === 'vi'
-        ? 'Trả lời bằng Tiếng Việt tự nhiên (xưng "em", gọi "anh/chị").'
-        : 'Reply in the same language as the user (vi or en).';
+      : 'Trả lời HOÀN TOÀN bằng Tiếng Việt tự nhiên, thân thiện (xưng "em", gọi "anh"), trừ khi người dùng nói hoàn toàn bằng tiếng Anh.';
 
   return [
-    'You are Aura, a warm, honest Windows female desktop assistant.',
-    `Rules: Keep "reply" concise (1-2 short plain sentences, no markdown/emojis). ${langRule}`,
-    'Truthfulness: Only report an action as done if the tool actually returned success: true; otherwise state the exact failure honestly.',
-    'Respond ONLY with JSON: {"reply": "<short plain text>", "emotion": "<neutral|happy|serious|sorry>", "language": "<vi|en>"}'
+    'You are Aura, a warm, natural Vietnamese female desktop assistant.',
+    `Rules: Keep "reply" concise (1-2 short natural spoken sentences, no markdown/emojis). ${langRule}`,
+    'Truthfulness: Only report an action as done if a tool actually returned success: true; otherwise state the exact failure honestly.',
+    'Respond ONLY with valid JSON: {"reply": "<short plain text>", "emotion": "<neutral|happy|serious|sorry>", "language": "<vi|en>"}'
   ].join('\n');
 }
 
@@ -590,8 +588,9 @@ class GeminiProvider extends LLMProvider {
     const modelName = this.model.replace(/^models\//, '');
     const candidateModels = [
       modelName,
-      'gemini-3.1-flash-lite',
-      'gemini-3.5-flash-lite'
+      'gemini-3.5-flash-lite',
+      'gemini-2.5-flash-lite',
+      'gemini-3.1-flash-lite'
     ].filter((m, idx, arr) => m && m !== 'gemini-3.6-flash' && m !== 'gemini-3.5-flash' && arr.indexOf(m) === idx);
 
     const generationConfig = {
@@ -1786,6 +1785,12 @@ class AuraLLMRouter {
     if (COMPLEX_TASK_REGEX.test(text) || text.length >= 260) {
       return { order: ['claude', 'groq', 'gemini', 'openrouter'], reason: 'complex_reasoning' };
     }
+    const TOOL_INTENT_REGEX =
+      /\b(mở|mo|đóng|dong|tìm|tim|đọc|doc|ghi|sửa|sua|tạo|tao|hoàn tác|undo|test|kiểm tra|chạy|chay|quét|quet|youtube|livestream|live|web|api|url|http|file|thư mục|thu muc|folder|dự án|du an|project|clipboard|nhắc|nhac|hẹn|hen|chụp|chup|bấm|bam|cuộn|cuon|gõ|go|calculator|notepad|open|close|find|read|write|edit|run|check|search|play|watch|remind|click|scroll|sở thích|so thich|phim|nhạc|nhac|kênh|kenh)\b/i;
+    if (!TOOL_INTENT_REGEX.test(text)) {
+      // Hội thoại trò chuyện thường (không cần gọi tool): ưu tiên Groq siêu nhanh (~0.6s) -> Gemini (~1s)
+      return { order: ['groq', 'gemini', 'openrouter', 'claude'], reason: 'fast_voice_chat' };
+    }
     return { order: ['gemini', 'groq', 'openrouter', 'claude'], reason: 'fast_everyday' };
   }
 
@@ -1988,16 +1993,16 @@ class AuraLLMRouter {
       { role: 'user', content: cleanUserText }
     ];
 
-    const OPEN_AI_ACTION_INTENT_REGEX =
-      /\b(mở|mo|đóng|dong|tìm|tim|đọc|doc|ghi|sửa|sua|tạo|tao|hoàn tác|undo|test|kiểm tra|chạy|chay|quét|quet|youtube|livestream|live|web|api|url|http|file|thư mục|thu muc|folder|dự án|du an|project|clipboard|nhắc|nhac|hẹn|hen|chụp|chup|bấm|bam|cuộn|cuon|gõ|go|calculator|notepad|open|close|find|read|write|edit|run|check|search|play|watch|remind|click|scroll|sở thích|so thich)\b/i;
+    const ACTION_INTENT_REGEX =
+      /\b(mở|mo|đóng|dong|tìm|tim|đọc|doc|ghi|sửa|sua|tạo|tao|hoàn tác|undo|test|kiểm tra|chạy|chay|quét|quet|youtube|livestream|live|web|api|url|http|file|thư mục|thu muc|folder|dự án|du an|project|clipboard|nhắc|nhac|hẹn|hen|chụp|chup|bấm|bam|cuộn|cuon|gõ|go|calculator|notepad|open|close|find|read|write|edit|run|check|search|play|watch|remind|click|scroll|sở thích|so thich|phim|nhạc|nhac|kênh|kenh)\b/i;
+    const needsTools = Boolean((options.tools && options.tools.length) || ACTION_INTENT_REGEX.test(cleanUserText));
 
     const getToolsFor = (prov) => {
       if (options.tools && options.tools.length) return options.tools;
+      if (!needsTools) return [];
       if (prov.name === 'claude') return convertToolsForClaude(NEUTRAL_TOOLS);
       if (prov.name === 'gemini') return convertToolsForGemini(NEUTRAL_TOOLS);
-      return OPEN_AI_ACTION_INTENT_REGEX.test(cleanUserText)
-        ? convertToolsForOpenAI(NEUTRAL_TOOLS, { compact: true })
-        : [];
+      return convertToolsForOpenAI(NEUTRAL_TOOLS, { compact: true });
     };
 
     // TURN 1: Gửi yêu cầu người dùng tới LLM (hỗ trợ Dual-Brain Smart Routing & Failover nóng)
@@ -2008,7 +2013,8 @@ class AuraLLMRouter {
       invokeFn: (prov) =>
         prov.chat(candidateMessages, getToolsFor(prov), {
           langHint: detectedInputLang,
-          timeoutMs: options.timeoutMs || 18000
+          systemPrompt: !needsTools ? buildAuraCompactSystemPrompt(detectedInputLang) : undefined,
+          timeoutMs: options.timeoutMs || 15000
         })
     });
 

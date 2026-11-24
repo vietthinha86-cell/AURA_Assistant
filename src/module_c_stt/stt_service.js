@@ -17,7 +17,7 @@ import { ISTTProvider } from '../interfaces/aura_contracts.js';
 const TARGET_RATE = 16000;
 const FRAME_SIZE = 2048; // ~128ms mỗi khung ở 16kHz
 const PRE_ROLL_FRAMES = 3; // Giữ ~384ms âm thanh trước khi phát hiện giọng nói để không mất âm đầu
-const SILENCE_HANGOVER_MS = 920; // Ngừng nói ~0.92s sẽ tự động chốt câu và nhận diện
+const SILENCE_HANGOVER_MS = 680; // Ngừng nói ~0.68s sẽ tự động chốt câu và nhận diện nhanh hơn
 const MIN_SPEECH_MS = 320;
 const MAX_UTTERANCE_MS = 18000;
 

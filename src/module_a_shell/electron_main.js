@@ -15,6 +15,8 @@ const readline = require('readline');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
+const https = require('https');
 const { AuraLLMRouter, httpsPostJson } = require('../module_e_brain/llm_providers');
 const { AuraComputerUseService } = require('../module_e_brain/computer_use_service');
 
@@ -146,20 +148,240 @@ function stopTtsWorker() {
   ttsWorkerProc = null;
 }
 
+// ============================================================================
+// GEMINI NATIVE NEURAL TTS (Giọng nữ Việt tự nhiên: Leda, Aoede, Zephyr, Sulafat, Kore)
+// - Tự động lưu RAM Cache (~1ms) + Disk Cache (logs/tts_cache/gem_*.wav)
+// - Trả trực tiếp audio/wav (hoặc tự gói header WAV 24kHz PCM nếu model trả L16)
+// - Nếu lỗi mạng/hết quota sẽ tự fallback mượt về Edge-TTS (vi-VN-HoaiMyNeural)
+// ============================================================================
+const geminiTtsMemoryCache = new Map();
+
+function detectTtsLangSimple(text) {
+  if (/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(text)) {
+    return 'vi';
+  }
+  const viWords = new Set([
+    'xin', 'chao', 'toi', 'ban', 'anh', 'chi', 'em', 'hom', 'nay', 'cam', 'on',
+    'khong', 'duoc', 'giup', 'tieng', 'viet', 'noi', 'nghe', 'cho', 'nha', 'nhe', 'da', 'vang'
+  ]);
+  const words = (String(text || '').toLowerCase().match(/[a-z]+/g) || []);
+  const hits = words.filter((w) => viWords.has(w)).length;
+  if (hits >= 2 || (words.length <= 3 && hits >= 1)) return 'vi';
+  return 'en';
+}
+
+function pcm24kToWavBuffer(pcmBuf, sampleRate = 24000) {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = pcmBuf.length;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(dataSize, 40);
+  return Buffer.concat([header, pcmBuf]);
+}
+
+async function synthesizeWithGeminiTts({ id, text, voiceName, lang, emotion, timeoutMs, noCache }) {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error('Thiếu GEMINI_API_KEY cho Gemini Neural TTS');
+  }
+  const cleanVoice = String(voiceName || 'Leda').replace(/^gemini:/i, '').trim() || 'Leda';
+  const ttsModel = (process.env.TTS_GEMINI_MODEL || 'gemini-3.8-flash-lite-tts').trim();
+  const cacheDir = path.join(projectRoot, 'logs', 'tts_cache');
+  const cacheHash = crypto
+    .createHash('sha256')
+    .update(`gem|${ttsModel}|${cleanVoice}|${text}`)
+    .digest('hex')
+    .slice(0, 16);
+  const cacheKey = `${cleanVoice}_${cacheHash}`;
+  const cacheFile = path.join(cacheDir, `gem_${cacheKey}.wav`);
+
+  if (!noCache && geminiTtsMemoryCache.has(cacheKey)) {
+    const cached = geminiTtsMemoryCache.get(cacheKey);
+    return {
+      id,
+      type: 'result',
+      text,
+      lang,
+      voice: `Gemini-${cleanVoice}`,
+      emotion: emotion || 'neutral',
+      mimeType: 'audio/wav',
+      firstChunkMs: 1,
+      totalMs: 1,
+      byteLength: cached.byteLength,
+      durationSec: cached.durationSec,
+      wordBoundaries: [],
+      audioBase64: cached.audioBase64,
+      cached: true,
+      cacheType: 'memory'
+    };
+  }
+
+  if (!noCache && fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > 512) {
+    const t0 = Date.now();
+    const wavBuf = fs.readFileSync(cacheFile);
+    const audioBase64 = wavBuf.toString('base64');
+    const durationSec = Number(Math.max(0.3, (wavBuf.length - 44) / 48000).toFixed(2));
+    geminiTtsMemoryCache.set(cacheKey, { audioBase64, byteLength: wavBuf.length, durationSec });
+    const ms = Math.max(1, Date.now() - t0);
+    return {
+      id,
+      type: 'result',
+      text,
+      lang,
+      voice: `Gemini-${cleanVoice}`,
+      emotion: emotion || 'neutral',
+      mimeType: 'audio/wav',
+      firstChunkMs: ms,
+      totalMs: ms,
+      byteLength: wavBuf.length,
+      durationSec,
+      wordBoundaries: [],
+      audioBase64,
+      cached: true,
+      cacheType: 'disk'
+    };
+  }
+
+  const t0 = Date.now();
+  const candidateModels = [ttsModel, 'gemini-3.8-flash-lite-tts', 'gemini-3.1-flash-tts-preview']
+    .filter((m, idx, arr) => m && arr.indexOf(m) === idx);
+
+  let lastErr = null;
+  for (const model of candidateModels) {
+    try {
+      const reqPath = `/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const res = await httpsPostJson({
+        hostname: 'generativelanguage.googleapis.com',
+        path: reqPath,
+        timeoutMs: Math.max(7000, timeoutMs || 9000),
+        bodyObj: {
+          contents: [{ parts: [{ text }] }],
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: cleanVoice }
+              }
+            }
+          }
+        }
+      });
+
+      if (res.statusCode !== 200 || !res.json) {
+        lastErr = new Error(`Gemini TTS ${model} HTTP ${res.statusCode}`);
+        continue;
+      }
+
+      const inline = res.json?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      if (!inline || !inline.data) {
+        lastErr = new Error(`Gemini TTS ${model} không trả về audio`);
+        continue;
+      }
+
+      const rawMime = String(inline.mimeType || 'audio/wav').toLowerCase();
+      let wavBuf = Buffer.from(inline.data, 'base64');
+      if (!rawMime.includes('wav')) {
+        const rateMatch = rawMime.match(/rate=(\d+)/);
+        const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+        wavBuf = pcm24kToWavBuffer(wavBuf, sampleRate);
+      }
+
+      const durationSec = Number(Math.max(0.3, (wavBuf.length - 44) / 48000).toFixed(2));
+      const audioBase64 = wavBuf.toString('base64');
+      const totalMs = Date.now() - t0;
+
+      try {
+        if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+        fs.writeFileSync(cacheFile, wavBuf);
+      } catch (_) {}
+
+      geminiTtsMemoryCache.set(cacheKey, { audioBase64, byteLength: wavBuf.length, durationSec });
+      return {
+        id,
+        type: 'result',
+        text,
+        lang,
+        voice: `Gemini-${cleanVoice}`,
+        emotion: emotion || 'neutral',
+        mimeType: 'audio/wav',
+        firstChunkMs: totalMs,
+        totalMs,
+        byteLength: wavBuf.length,
+        durationSec,
+        wordBoundaries: [],
+        audioBase64,
+        cached: false
+      };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('Gemini Neural TTS thất bại');
+}
+
 ipcMain.handle('tts:synthesize', async (_event, payload) => {
+  const reqId = payload.id || `tts_${Date.now()}`;
+  const rawText = (payload.text || '').trim();
+  const textBase64 = Buffer.from(rawText, 'utf8').toString('base64');
+  const timeoutMs = Number(payload.timeoutMs) || (payload.isFirstSentence ? 8000 : 12000);
+  const resolvedLang = (!payload.lang || payload.lang === 'auto') ? detectTtsLangSimple(rawText) : payload.lang;
+  const requestedVoiceVi = payload.voiceVi || process.env.TTS_VOICE_VI || 'gemini:Leda';
+  const requestedVoiceEn = payload.voiceEn || process.env.TTS_VOICE_EN || 'en-US-AriaNeural';
+  const selectedVoice = resolvedLang === 'vi' ? requestedVoiceVi : requestedVoiceEn;
+
+  writeLog(
+    'TTS_REQ',
+    `ID=${reqId} | Lang=${resolvedLang} | Voice=${selectedVoice} | Timeout=${timeoutMs}ms | FirstSentence=${Boolean(payload.isFirstSentence)} | Text="${rawText.substring(0, 80)}"`
+  );
+
+  // 1. Nếu chọn giọng AI nữ tự nhiên Gemini (ví dụ gemini:Leda, gemini:Aoede, gemini:Zephyr...)
+  if (String(selectedVoice).toLowerCase().startsWith('gemini:') && (process.env.GEMINI_API_KEY || '').trim()) {
+    try {
+      const gemRes = await synthesizeWithGeminiTts({
+        id: reqId,
+        text: rawText,
+        voiceName: selectedVoice,
+        lang: resolvedLang,
+        emotion: payload.emotion || 'neutral',
+        timeoutMs: Math.max(8500, timeoutMs),
+        noCache: Boolean(payload.noCache)
+      });
+      const cacheTag = gemRes.cached ? `[CACHE:${gemRes.cacheType || 'hit'}] ` : '';
+      writeLog(
+        'TTS_OK',
+        `ID=${reqId} | ${cacheTag}DetectedLang=${gemRes.lang} | Voice=${gemRes.voice} | Emotion=${gemRes.emotion} | FirstChunk=${gemRes.firstChunkMs}ms | TotalSynth=${gemRes.totalMs}ms | Duration=${gemRes.durationSec}s | Size=${gemRes.byteLength}B`
+      );
+      return gemRes;
+    } catch (gemErr) {
+      writeLog('TTS_GEMINI_FALLBACK', `ID=${reqId} | Gemini TTS (${selectedVoice}) lỗi: ${gemErr.message} -> tự chuyển về Edge-TTS.`);
+    }
+  }
+
+  // 2. Edge-TTS Worker (mặc định cho tiếng Anh / khi người dùng chọn Edge / fallback khi Gemini lỗi)
   if (!ttsWorkerProc || ttsWorkerProc.killed) {
     startTtsWorker();
   }
 
-  const reqId = payload.id || `tts_${Date.now()}`;
-  const rawText = (payload.text || '').trim();
-  const textBase64 = Buffer.from(rawText, 'utf8').toString('base64');
-  const timeoutMs = Number(payload.timeoutMs) || (payload.isFirstSentence ? 6000 : 12000);
-
-  writeLog(
-    'TTS_REQ',
-    `ID=${reqId} | LangHint=${payload.lang || 'auto'} | Timeout=${timeoutMs}ms | FirstSentence=${Boolean(payload.isFirstSentence)} | Text="${rawText.substring(0, 80)}"`
-  );
+  const edgeVoiceVi = String(requestedVoiceVi).toLowerCase().startsWith('gemini:')
+    ? 'vi-VN-HoaiMyNeural'
+    : requestedVoiceVi;
+  const edgeVoiceEn = String(requestedVoiceEn).toLowerCase().startsWith('gemini:')
+    ? 'en-US-AriaNeural'
+    : requestedVoiceEn;
 
   return new Promise((resolve) => {
     const timeoutId = setTimeout(() => {
@@ -190,11 +412,11 @@ ipcMain.handle('tts:synthesize', async (_event, payload) => {
       const reqLine = JSON.stringify({
         id: reqId,
         textBase64,
-        lang: payload.lang || 'auto',
-        voiceVi: payload.voiceVi || process.env.TTS_VOICE_VI || 'vi-VN-HoaiMyNeural',
-        voiceEn: payload.voiceEn || process.env.TTS_VOICE_EN || 'en-US-AriaNeural',
-        rate: payload.rate || process.env.TTS_RATE || '+8%',
-        pitch: payload.pitch || process.env.TTS_PITCH || '+5Hz',
+        lang: resolvedLang,
+        voiceVi: edgeVoiceVi,
+        voiceEn: edgeVoiceEn,
+        rate: payload.rate || process.env.TTS_RATE || '+10%',
+        pitch: payload.pitch || process.env.TTS_PITCH || '+0Hz',
         emotion: payload.emotion || 'auto',
         timeout: Math.max(3, Math.round(timeoutMs / 1000)),
         noCache: Boolean(payload.noCache)
@@ -257,13 +479,115 @@ function pcm16kBase64ToWavBuffer(pcmBase64) {
   return Buffer.concat([header, pcmBuf]);
 }
 
+async function transcribeWithGroqWhisper(pcmBase64, initialPrompt, langHint = 'auto') {
+  const apiKey = (process.env.GROQ_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error('Chưa cấu hình GROQ_API_KEY trong file .env');
+  }
+
+  const sttModel = (process.env.GROQ_STT_MODEL || 'whisper-large-v3-turbo').trim();
+  const wavBuf = pcm16kBase64ToWavBuffer(pcmBase64);
+  const promptText =
+    initialPrompt ||
+    'Aura, tiếng Việt, giọng nói, mở, tìm, YouTube, Chrome, Notepad, Thịnh, thư mục, ổ D, màn hình, kiểm tra.';
+  const boundary = `----AuraGroqStt${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+
+  const parts = [
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${sttModel}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="response_format"\r\n\r\nverbose_json\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="temperature"\r\n\r\n0\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\n${promptText}\r\n`)
+  ];
+  if (langHint === 'vi' || langHint === 'en') {
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${langHint}\r\n`));
+  }
+  parts.push(
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="speech.wav"\r\nContent-Type: audio/wav\r\n\r\n`),
+    wavBuf,
+    Buffer.from(`\r\n--${boundary}--\r\n`)
+  );
+  const bodyBuf = Buffer.concat(parts);
+
+  const t0 = Date.now();
+  const httpRes = await new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: 'api.groq.com',
+        port: 443,
+        path: '/openai/v1/audio/transcriptions',
+        method: 'POST',
+        family: 4,
+        timeout: 12000,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': bodyBuf.length
+        }
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          const raw = Buffer.concat(chunks).toString('utf8');
+          let json = null;
+          try { json = JSON.parse(raw); } catch (_) {}
+          resolve({ statusCode: res.statusCode || 0, raw, json });
+        });
+      }
+    );
+    req.on('timeout', () => req.destroy(new Error('GROQ_STT_TIMEOUT')));
+    req.on('error', reject);
+    req.write(bodyBuf);
+    req.end();
+  });
+
+  const transcribeMs = Date.now() - t0;
+  if (httpRes.statusCode !== 200 || !httpRes.json) {
+    throw new Error(`Groq Whisper HTTP ${httpRes.statusCode}: ${httpRes.raw.slice(0, 200)}`);
+  }
+
+  let cleanText = String(httpRes.json.text || '').trim();
+  const segments = Array.isArray(httpRes.json.segments) ? httpRes.json.segments : [];
+  if (segments.length > 0) {
+    const avgNoSpeech = segments.reduce((s, seg) => s + Number(seg.no_speech_prob || 0), 0) / segments.length;
+    if (avgNoSpeech > 0.82 && cleanText.length < 30) {
+      cleanText = '';
+    }
+  }
+
+  const rawLang = String(httpRes.json.language || '').toLowerCase();
+  const hasViDiacritics = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(cleanText);
+  const lang = hasViDiacritics || rawLang.startsWith('vi') ? 'vi' : (rawLang.startsWith('en') ? 'en' : 'vi');
+
+  const pcmBuf = Buffer.from(pcmBase64, 'base64');
+  const audioSec = Number((pcmBuf.length / (16000 * 2)).toFixed(2));
+  const avgLogProb = segments.length
+    ? segments.reduce((s, seg) => s + Number(seg.avg_logprob || -0.15), 0) / segments.length
+    : -0.1;
+  const langProb = Number(Math.max(0.5, Math.min(0.99, Math.exp(avgLogProb))).toFixed(2));
+
+  return {
+    type: 'result',
+    text: cleanText,
+    lang,
+    langProb,
+    audioSec,
+    transcribeMs,
+    loadMs: 0,
+    justLoaded: false,
+    workerTotalMs: transcribeMs,
+    provider: 'groq-whisper',
+    rssMb: 0
+  };
+}
+
 async function transcribeWithGemini(pcmBase64, initialPrompt) {
   const apiKey = (process.env.GEMINI_API_KEY || '').trim();
   if (!apiKey) {
     throw new Error('Chưa cấu hình GEMINI_API_KEY trong file .env');
   }
 
-  const modelName = (process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite').replace(/^models\//, '');
+  const modelName = (process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite').replace(/^models\//, '');
   const reqPath = `/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const wavBuf = pcm16kBase64ToWavBuffer(pcmBase64);
@@ -444,9 +768,19 @@ ipcMain.handle('stt:set_conversation_active', async (_event, active) => {
   writeLog('STT_MODE', `ConversationModeActive=${isConversationModeActive} | IdleTimeout=${STT_IDLE_UNLOAD_MS / 1000}s`);
   if (isConversationModeActive) {
     clearTimeout(sttIdleTimer);
-    // Nạp sẵn model ngay khi bật chế độ trò chuyện nếu dùng provider local
-    const provider = (process.env.STT_PROVIDER || 'local').toLowerCase().trim();
-    if (provider !== 'gemini' && !sttModelLoaded) {
+    const provider = (process.env.STT_PROVIDER || 'auto').toLowerCase().trim();
+    const hasGroq = Boolean((process.env.GROQ_API_KEY || '').trim());
+    const hasGemini = Boolean((process.env.GEMINI_API_KEY || '').trim());
+    const useCloudStt =
+      (provider === 'auto' && (hasGroq || hasGemini)) ||
+      (provider === 'groq' && hasGroq) ||
+      (provider === 'gemini' && hasGemini);
+
+    if (useCloudStt) {
+      const cloudName = (provider === 'groq' || (provider === 'auto' && hasGroq)) ? 'Groq Whisper' : 'Gemini Cloud';
+      sendSttStatus('ready', { rssMb: 0, provider: cloudName });
+      writeLog('STT_MODE', `Dùng Cloud STT (${cloudName}, 0 MB RAM) - không nạp faster-whisper local.`);
+    } else if (!sttModelLoaded) {
       sendSttStatus('loading');
       sttRequest({ cmd: 'load' }, 180000).then((res) => {
         if (res.type === 'loaded') {
@@ -463,6 +797,11 @@ ipcMain.handle('stt:set_conversation_active', async (_event, active) => {
 });
 
 ipcMain.handle('stt:load', async () => {
+  const provider = (process.env.STT_PROVIDER || 'auto').toLowerCase().trim();
+  if ((provider === 'auto' || provider === 'groq') && (process.env.GROQ_API_KEY || '').trim()) {
+    sendSttStatus('ready', { rssMb: 0, provider: 'Groq Whisper' });
+    return { type: 'loaded', model: 'whisper-large-v3-turbo', computeType: 'cloud', loadMs: 0, rssMb: 0, justLoaded: false };
+  }
   sttBusyCount++;
   clearTimeout(sttIdleTimer);
   try {
@@ -492,26 +831,42 @@ ipcMain.handle('stt:transcribe', async (_event, payload) => {
   sttBusyCount++;
   clearTimeout(sttIdleTimer);
 
-  const provider = (process.env.STT_PROVIDER || 'local').toLowerCase().trim();
+  const provider = (process.env.STT_PROVIDER || 'auto').toLowerCase().trim();
+  const hasGroq = Boolean((process.env.GROQ_API_KEY || '').trim());
+  const hasGemini = Boolean((process.env.GEMINI_API_KEY || '').trim());
 
-  // 1. Nếu cấu hình STT_PROVIDER=gemini: Ưu tiên gửi sang Gemini Cloud STT
-  if (provider === 'gemini') {
-    try {
-      writeLog('STT_GEMINI_REQ', `Đang chép lời bằng Gemini API (model=${process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite'})...`);
-      const gRes = await transcribeWithGemini(payload.pcmBase64, payload.initialPrompt);
-      writeLog(
-        'STT_OK',
-        `[Gemini] Lang=${gRes.lang} | Audio=${gRes.audioSec}s | Transcribe=${gRes.transcribeMs}ms | Text="${(gRes.text || '').substring(0, 120)}"`
-      );
-      return gRes;
-    } catch (err) {
-      writeLog('STT_GEMINI_FALLBACK', `Gọi Gemini STT thất bại (${err.message}). Tự động quay về local faster-whisper...`);
-      // Fallback về local faster-whisper bên dưới!
-    }
-  }
-
-  // 2. Chế độ Local faster-whisper (mặc định hoặc fallback)
   try {
+    // 1. Ưu tiên Groq Whisper Large-v3-Turbo (siêu nhanh ~0.4-0.9s, chính xác tiếng Việt cao, 0 MB RAM)
+    if ((provider === 'auto' || provider === 'groq') && hasGroq) {
+      try {
+        const groqRes = await transcribeWithGroqWhisper(payload.pcmBase64, payload.initialPrompt, payload.lang || 'auto');
+        sendSttStatus('ready', { rssMb: 0, provider: 'Groq Whisper' });
+        writeLog(
+          'STT_OK',
+          `[Groq-Whisper] Lang=${groqRes.lang}(${groqRes.langProb}) | Audio=${groqRes.audioSec}s | Transcribe=${groqRes.transcribeMs}ms | Text="${(groqRes.text || '').substring(0, 120)}"`
+        );
+        return groqRes;
+      } catch (err) {
+        writeLog('STT_GROQ_FALLBACK', `Groq Whisper lỗi (${err.message}). Chuyển sang dự phòng...`);
+      }
+    }
+
+    // 2. Dự phòng hoặc chế độ chỉ định Gemini Cloud STT
+    if ((provider === 'gemini' || provider === 'auto') && hasGemini) {
+      try {
+        const gRes = await transcribeWithGemini(payload.pcmBase64, payload.initialPrompt);
+        sendSttStatus('ready', { rssMb: 0, provider: 'Gemini Cloud' });
+        writeLog(
+          'STT_OK',
+          `[Gemini] Lang=${gRes.lang} | Audio=${gRes.audioSec}s | Transcribe=${gRes.transcribeMs}ms | Text="${(gRes.text || '').substring(0, 120)}"`
+        );
+        return gRes;
+      } catch (err) {
+        writeLog('STT_GEMINI_FALLBACK', `Gemini STT lỗi (${err.message}). Tự động quay về local faster-whisper...`);
+      }
+    }
+
+    // 3. Chế độ Local faster-whisper (khi offline hoặc STT_PROVIDER=local)
     const wasLoaded = sttModelLoaded;
     if (!wasLoaded) sendSttStatus('loading');
     const res = await sttRequest(

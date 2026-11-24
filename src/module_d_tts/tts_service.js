@@ -19,14 +19,20 @@ export class EdgeTTSService extends ITTSProvider {
     super();
     this.eventBus = eventBus;
     this.avatar = avatarEngine;
-    this.provider = config.provider || 'edge-tts';
-    this.voiceVi = config.voiceVi || 'vi-VN-HoaiMyNeural';
+    this.provider = config.provider || 'auto-tts';
+    this.voiceVi = config.voiceVi || 'gemini:Leda';
     this.voiceEn = config.voiceEn || 'en-US-AriaNeural';
-    this.rate = config.rate || '+8%';
-    this.pitch = config.pitch || '+5Hz';
+    this.rate = config.rate || '+10%';
+    this.pitch = config.pitch || '+0Hz';
     this.currentAudio = null;
     this.reqCounter = 0;
     this.playbackSessionId = 0;
+  }
+
+  setVoiceVi(voiceId) {
+    if (voiceId && typeof voiceId === 'string') {
+      this.voiceVi = voiceId.trim();
+    }
   }
 
   /**
@@ -106,7 +112,8 @@ export class EdgeTTSService extends ITTSProvider {
    */
   async _synthesizeSingleSentence(sentenceText, options = {}) {
     const reqId = options.id || `tts_sent_${Date.now()}_${++this.reqCounter}`;
-    const timeoutMs = options.timeoutMs || (options.isFirstSentence ? 6000 : 12000);
+    const isGeminiVoice = String(options.voiceVi || this.voiceVi || '').startsWith('gemini:') && (options.lang === 'vi' || options.lang === 'auto');
+    const timeoutMs = options.timeoutMs || (isGeminiVoice ? 9000 : (options.isFirstSentence ? 6000 : 12000));
     const maxRetries = options.isFirstSentence ? 1 : 2; // Câu đầu thử lại tối đa 1 lần (tổng 2 lượt)
 
     let lastErr = null;
@@ -155,7 +162,8 @@ export class EdgeTTSService extends ITTSProvider {
         return resolve({ aborted: true });
       }
 
-      const audioSrc = `data:audio/mp3;base64,${res.audioBase64}`;
+      const mimeType = res.mimeType || 'audio/mp3';
+      const audioSrc = `data:${mimeType};base64,${res.audioBase64}`;
       const audioEl = new Audio(audioSrc);
       audioEl.crossOrigin = 'anonymous';
       this.currentAudio = audioEl;
@@ -268,6 +276,9 @@ export class EdgeTTSService extends ITTSProvider {
 
       const firstChunkMs = res0.firstChunkMs;
       const totalLatencyMs = Math.round(performance.now() - tStartOverall);
+      const estDurationSec = typeof res0.durationSec === 'number' && res0.durationSec > 0
+        ? res0.durationSec
+        : Number(Math.max(0.4, (res0.byteLength || 0) / (res0.mimeType === 'audio/wav' ? 48000 : 6000)).toFixed(1));
 
       if (this.eventBus) {
         this.eventBus.emit('tts:playing', {
@@ -278,6 +289,7 @@ export class EdgeTTSService extends ITTSProvider {
           emotion: res0.emotion || detectedEmotion,
           firstChunkMs,
           totalLatencyMs,
+          durationSec: estDurationSec,
           byteLength: res0.byteLength,
           cached: Boolean(res0.cached)
         });
@@ -337,6 +349,9 @@ export class EdgeTTSService extends ITTSProvider {
     if (this.playbackSessionId !== currentSession) return null;
 
     const firstAudioStartMs = Math.round(performance.now() - tStartOverall);
+    const estFirstSec = typeof resFirst.durationSec === 'number' && resFirst.durationSec > 0
+      ? resFirst.durationSec
+      : Number(Math.max(0.4, (resFirst.byteLength || 0) / (resFirst.mimeType === 'audio/wav' ? 48000 : 6000)).toFixed(1));
 
     if (this.eventBus) {
       this.eventBus.emit('tts:playing', {
@@ -350,6 +365,7 @@ export class EdgeTTSService extends ITTSProvider {
         emotion: resFirst.emotion || detectedEmotion,
         firstChunkMs: resFirst.firstChunkMs,
         totalLatencyMs: firstAudioStartMs,
+        durationSec: estFirstSec,
         isPipelined: true,
         cached: Boolean(resFirst.cached)
       });
